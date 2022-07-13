@@ -1,4 +1,4 @@
-# Evalutating multi task temporal models 
+# How to train temporal multi-task models when the data is partially annotated across time
 MSc Project Code 
 
 # Dataset
