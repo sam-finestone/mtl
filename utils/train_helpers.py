@@ -285,7 +285,7 @@ def test_single_task(epoch, test_loader, single_task_model, writer, scheduler_sl
     return epoch_test_loss, cost, avg_cost
 
 
-def static_single_task_trainer(epoch, train_loader, model, enc_optimizer, decoder_opt, task, writer):
+def static_single_task_trainer(epoch, train_loader, model, model_opt, task, writer):
     cost = np.zeros(6, dtype=np.float32)
     avg_cost = np.zeros([1, 6], dtype=np.float32)
     epoch_loss_model = 0
@@ -299,6 +299,7 @@ def static_single_task_trainer(epoch, train_loader, model, enc_optimizer, decode
     for batch_idx, (inputs, labels, depth) in enumerate(train_loader):
         # data_time.update(time.time() - end)
         # [8, 1, 256, 512]
+        model_opt.zero_grad()
         inputs = inputs.float().to(device)
         # torch.Size([8, 1, 256, 512])
         gt_semantic_labels = labels.float().to(device)
@@ -309,8 +310,6 @@ def static_single_task_trainer(epoch, train_loader, model, enc_optimizer, decode
         # task_pred.mean().backward()  # works
         print(task_pred.grad_fn)
         print(task_pred.shape)
-        enc_optimizer.zero_grad()
-        decoder_opt.zero_grad()
 
         if task == 'segmentation':
             gt_semantic_labels = torch.argmax(gt_semantic_labels, dim=1)
@@ -338,8 +337,7 @@ def static_single_task_trainer(epoch, train_loader, model, enc_optimizer, decode
         #     cost[6] = train_loss.item()
         #     cost[7], cost[8], cost[9], cost[10], cost[11] = normal_error(train_pred, train_normal)
 
-        enc_optimizer.step()
-        decoder_opt.step()
+        model_opt.step()
         epoch_loss_model += loss.item()
         avg_cost[:6] += cost[:6] / len(train_loader)
         if batch_idx % 50 == 0:
