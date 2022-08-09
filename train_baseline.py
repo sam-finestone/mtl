@@ -102,20 +102,19 @@ print('Initialising Model')
 # Initializing encoder
 deeplabv3_backbone = cfg["model"]["backbone"]["encoder"]["resnet_version"]
 enc = DeepLabv3(deeplabv3_backbone).to(device)
-enc_optimizer = optim.SGD(enc.parameters(),
-                          lr=cfg["training"]["optimizer"]["lr0"],
-                          momentum=cfg["training"]["optimizer"]["momentum"],
-                          weight_decay=cfg["training"]["optimizer"]["wd"])
-scheduler = optim.lr_scheduler.StepLR(enc_optimizer,
-                                      step_size=cfg["training"]["scheduler"]["step"],
-                                      gamma=cfg["training"]["scheduler"]["gamma"])
+# enc_optimizer = optim.SGD(enc.parameters(),
+#                           lr=cfg["training"]["optimizer"]["lr0"],
+#                           momentum=cfg["training"]["optimizer"]["momentum"],
+#                           weight_decay=cfg["training"]["optimizer"]["wd"])
 
 # initialise decoders (one for each task)
 dec = decoder(image_size, CLASS_TASKS, SynchronizedBatchNorm1d).to(device)
-dec_opt = optim.Adam(dec.parameters(), lr=cfg["training"]["optimizer"]["lr0"])
-
 # initialise multi (or single) - task model
 model = StaticTaskModel(enc, dec).to(device)
+model_opt = optim.Adam(model.parameters(), lr=cfg["training"]["optimizer"]["lr0"])
+scheduler = optim.lr_scheduler.StepLR(model_opt,
+                                      step_size=cfg["training"]["scheduler"]["step"],
+                                      gamma=cfg["training"]["scheduler"]["gamma"])
 # model = model.to(device)
 model = nn.DataParallel(model)
 
@@ -169,7 +168,7 @@ with mlflow.start_run():
     lowest_error_decoders = float('inf')
     for epoch in range(EPOCHS):
         train_loss, cost_train, avg_cost_train = static_single_task_trainer(epoch, train_dataloader, model,
-                                                                            enc_optimizer, dec_opt, TASK, writer)
+                                                                            model_opt, TASK, writer)
 
         test_loss, cost_test, avg_cost_test = static_test_single_task(epoch, test_dataloader, model, writer,
                                                                       scheduler, TASK, SAMPLES_PATH)
