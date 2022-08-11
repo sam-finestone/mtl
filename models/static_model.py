@@ -23,7 +23,7 @@ class StaticTaskModel(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
         # self.atten = attention
-        self.version = version
+        # self.version = version
 
     def forward(self, input):
         # [b, c, h, w]

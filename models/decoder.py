@@ -218,9 +218,9 @@ class Decoder(nn.Module):
 
 
 
-class decoder(nn.Module):
-    def __init__(self, input_dim, num_classes, BatchNorm):
-        super(decoder, self).__init__()
+class SegDecoder(nn.Module):
+    def __init__(self, input_dim, num_classes, drop_out, BatchNorm):
+        super(SegDecoder, self).__init__()
         # if backbone == "resnet" or backbone == "drn":
         #     low_level_inplanes = 256
         self.conv1 = nn.Conv2d(input_dim, 256, 1, bias=False)
@@ -230,11 +230,11 @@ class decoder(nn.Module):
             nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
             BatchNorm(256),
             nn.ReLU(),
-            nn.Dropout(0.5),
+            nn.Dropout(drop_out),
             nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
             BatchNorm(256),
             nn.ReLU(),
-            nn.Dropout(0.1),
+            nn.Dropout(drop_out),
             nn.Conv2d(256, num_classes, kernel_size=1, stride=1),
         )
         self._init_weight()
@@ -246,6 +246,51 @@ class decoder(nn.Module):
         # x = torch.cat((x, low_level_feat), dim=1)
         x = F.interpolate(x, size=(256, 512), mode="bilinear", align_corners=True)
         x = self.last_conv(x)
+        return x
+
+    def _init_weight(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                torch.nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, SynchronizedBatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+
+
+
+class DepthDecoder(nn.Module):
+    def __init__(self, input_dim, num_classes, drop_out, BatchNorm):
+        super(DepthDecoder, self).__init__()
+        # if backbone == "resnet" or backbone == "drn":
+        #     low_level_inplanes = 256
+        self.conv1 = nn.Conv2d(input_dim, 256, 1, bias=False)
+        self.bn1 = BatchNorm(256)
+        self.relu = nn.ReLU()
+        self.last_conv = nn.Sequential(
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
+            BatchNorm(256),
+            nn.ReLU(),
+            nn.Dropout(drop_out),
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
+            BatchNorm(256),
+            nn.ReLU(),
+            nn.Dropout(drop_out),
+            nn.Conv2d(256, num_classes, kernel_size=1, stride=1),
+        )
+        self.softplus = torch.nn.Softplus(beta=1, threshold=20)
+        self._init_weight()
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        # x = torch.cat((x, low_level_feat), dim=1)
+        x = F.interpolate(x, size=(256, 512), mode="bilinear", align_corners=True)
+        x = self.last_conv(x)
+        x = self.softplus(x)
         return x
 
     def _init_weight(self):
