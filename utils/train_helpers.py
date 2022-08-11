@@ -295,10 +295,16 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
     loss_running = AverageMeter('Loss', ':.4e')
     acc_running = AverageMeter('Accuracy', ':.3f')
     error_running = AverageMeter('Absolute error', ':.3f')
-    progress = ProgressMeter(
-        len(train_loader),
-        [batch_time, data_time, loss_running, acc_running],
-        prefix="Train, epoch: [{}]".format(epoch))
+    if task == 'segmentation':
+        progress = ProgressMeter(
+            len(train_loader),
+            [batch_time, data_time, loss_running, acc_running],
+            prefix="Train, epoch: [{}]".format(epoch))
+    if task == 'depth':
+        progress = ProgressMeter(
+            len(train_loader),
+            [batch_time, data_time, loss_running, error_running],
+            prefix="Train, epoch: [{}]".format(epoch))
     model.train()
     conf_mat = ConfMatrix(19)
     # initialise the loss the function
@@ -316,7 +322,6 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
         # outputs a single task prediction
         task_pred = model(inputs)
         if task == 'segmentation':
-            # print(task_pred.shape)
             loss = criterion(task_pred, gt_semantic_labels.squeeze().long())
             # backward pass
             loss.backward()
@@ -358,8 +363,6 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
                 with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as batch_log:
                     batch_log.write('{}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, batch_idx, loss, acc))
             if task == 'depth':
-                print(LOG_FILE)
-                print(os.path.join(LOG_FILE, 'log_train_batch.txt'))
                 with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as batch_log:
                     batch_log.write('{}, {}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, batch_idx, loss,
                                                                                    abs_err, rel_err))
