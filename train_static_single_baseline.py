@@ -149,7 +149,7 @@ if not os.path.exists(LOG_FILE):
     os.makedirs(LOG_FILE)
 
 # for each training batch record important metrics
-if task == 'segmentation':
+if TASK == 'segmentation':
     # for each epoch record important metrics
     with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
         epoch_log.write('epoch, train loss, val loss, train acc, val acc, miou\n')
@@ -157,7 +157,7 @@ if task == 'segmentation':
     with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as f:
         f.write('Epoch, Batch Index, train loss, train acc\n')
 
-if task == 'depth':
+if TASK == 'depth':
     # for each epoch record important metrics
     with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
         epoch_log.write('epoch, train loss, val loss, train error, val error\n')
@@ -243,8 +243,8 @@ with mlflow.start_run():
             metrics['miou'].append(miou)
             print('Epoch {} val loss: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch, val_loss, val_acc, miou))
 
-            logging.info(f"| Epoch: {epoch + 1:03} | Train Loss: {train_loss:.3f} | Train acc: {train_acc:7.3f} | "
-                         f"Val. Loss: {valid_loss:.3f} | Val. acc: {val_acc:7.3f} | Val. miou: {miou:7.3f}|")
+            # logging.info(f"| Epoch: {epoch + 1:03} | Train Loss: {train_loss:.3f} | Train acc: {train_acc:7.3f} | "
+            #              f"Val. Loss: {valid_loss:.3f} | Val. acc: {val_acc:7.3f} | Val. miou: {miou:7.3f}|")
 
             # Write segmentation logs
             with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
@@ -271,7 +271,7 @@ with mlflow.start_run():
 
         elif TASK == 'depth':
             train_loss, train_err = static_single_task_trainer(epoch, criterion, train_dataloader, model,
-                                                               model_opt, TASK, writer)
+                                                               model_opt, TASK, LOG_FILE)
             metrics['train_loss'].append(train_loss)
             metrics['train_error'].append(train_err)
             print('Epoch {} train loss: {:.4f}, abs error: {:.4f}'.format(epoch, train_loss, train_err))

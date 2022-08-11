@@ -355,11 +355,13 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
         progress.display(batch_idx)
         if batch_idx % 25 == 0:
             if task == 'segmentation':
-                with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as epoch_log:
-                    epoch_log.write('{}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, batch_idx, loss, acc))
+                with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as batch_log:
+                    batch_log.write('{}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, batch_idx, loss, acc))
             if task == 'depth':
-                with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as epoch_log:
-                    epoch_log.write('{}, {:.5f}, {:.5f}, {:.5f},  {:.5f}\n'.format(epoch, batch_idx, loss,
+                print(LOG_FILE)
+                print(os.path.join(LOG_FILE, 'log_train_batch.txt'))
+                with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as batch_log:
+                    batch_log.write('{}, {}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, batch_idx, loss,
                                                                                    abs_err, rel_err))
 
         # Measure time
@@ -436,7 +438,7 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, wr
     # return epoch_test_loss, cost, avg_cost
     if task == 'depth':
         return error_running.avg, loss_running.avg
-    
+
     miou = iou.outputScores()
     print('Accuracy      : {:5.3f}'.format(acc_running.avg))
     print('---------------------')
