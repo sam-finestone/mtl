@@ -54,8 +54,6 @@ import imageio
 
 from torch.utils import data
 import random
-from ptsemseg.utils import recursive_glob
-from ptsemseg.augmentations import Compose, RandomHorizontallyFlip, RandomRotate, Scale
 
 
 
@@ -72,7 +70,7 @@ def recursive_glob_set(rootdir=".", suffix=""):
     )
 
 
-class temporal_dataloader(data.Dataset):
+class temporal_loader(data.Dataset):
     """cityscapesLoader
 
     https://www.cityscapes-dataset.com
@@ -115,8 +113,7 @@ class temporal_dataloader(data.Dataset):
             augmentations=None,
             test_mode=False,
             model_name=None,
-            K=5,
-            path_num=2,
+            interval=5,
     ):
         """__init__
 
@@ -128,7 +125,7 @@ class temporal_dataloader(data.Dataset):
         """
         self.path_num = path_num
         self.interval = interval
-        self.K = K
+        # self.K = K
         self.root = root
         self.split = split
         self.augmentations = augmentations
@@ -143,7 +140,7 @@ class temporal_dataloader(data.Dataset):
         self.annotations_base = os.path.join(self.root, "gtFine", self.split)
         self.depth_base = os.path.join(self.root, "disparity_sequence", self.split)
 
-        self.files[split] = recursive_glob(rootdir=self.videos_base, suffix=".png")
+        self.files[split] = recursive_glob(rootdir=self.images_base, suffix=".png")
         self.seg_files[split] = recursive_glob_set(rootdir=self.images_base, suffix=".png")
 
         self.void_classes = [0, 1, 2, 3, 4, 5, 6, 9, 10, 14, 15, 16, 18, 29, 30, -1]
@@ -201,60 +198,62 @@ class temporal_dataloader(data.Dataset):
 
     def __len__(self):
         """__len__"""
-        return len(self.files[self.split])
+        return len(self.files[self.split])*self.interval
 
     def __getitem__(self, index):
         """__getitem__
 
         :param index:
         """
+        images = list()
+        segmentation_labels = list()
+        depth_labels = list()
+        normal_labels = list()
 
-        if not self.test_mode:
-            img_path = self.files[self.split][index].rstrip()
-            lbl_path = os.path.join(
-                self.annotations_base,
-                img_path.split(os.sep)[-2],
-                os.path.basename(img_path)[:-15] + "gtFine_labelIds.png",
-            )
-            lbl = imageio.imread(lbl_path)
-            lbl = self.encode_segmap(np.array(lbl, dtype=np.uint8))
+        img_path = self.files[self.split][index].rstrip()
+        lbl_path = os.path.join(
+            self.annotations_base,
+            img_path.split(os.sep)[-2],
+            os.path.basename(img_path)[:-15] + "gtFine_labelIds.png",
+        )
+        lbl = imageio.imread(lbl_path)
+        lbl = self.encode_segmap(np.array(lbl, dtype=np.uint8))
+        seg_labels = torch.from_numpy(lbl).long()
+        seg_labels = seg_labels.reshape(1, seg_labels.shape[0], seg_labels.shape[1])
+        vid_info = img_path.split('/')[-1].split('_')
+        city, seq, cur_frame = vid_info[0], vid_info[1], vid_info[2]
+        annotated_frame_index = int(cur_frame)
+        start_index = annotated_frame_index - self.interval + 1
+        end_index = annotated_frame_index + 1
+        for index_frame in range(start_index, end_index):
+            curr_frame = annotated_frame - index_frame
 
-            vid_info = img_path.split('/')[-1].split('_')
-            city, seq, cur_frame = vid_info[0], vid_info[1], vid_info[2]
-            f4_id = int(cur_frame)
-            f3_id = f4_id - random.randint(1, self.interval)
-            f2_id = f3_id - random.randint(1, self.interval)
-            f1_id = f2_id - random.randint(1, self.interval)
+            # Add the segmentation ground-truth
+            segmentation_labels.append(seg_labels)
 
-            f4_path = os.path.join(self.videos_base, city, ("%s_%s_%06d_leftImg8bit.png" % (city, seq, f4_id)))
-            f4_img = imageio.imread(f4_path)
-            f4_img = np.array(f4_img, dtype=np.uint8)
+            image_path = os.path.join(self.videos_base, city, ("%s_%s_%06d_leftImg8bit.png" % (city, seq, curr_frame)))
+            depth_path = os.path.join(self.depth_base, city, ("%s_%s_%06d_disparity.png" % (city, seq, curr_frame)))
+            image = imageio.imread(image_path)
+            image = np.array(image, dtype=np.uint8)
+            image = torch.from_numpy(image).permute(2, 0, 1).float()
+            images.append(image)
 
-            f3_path = os.path.join(self.videos_base, city, ("%s_%s_%06d_leftImg8bit.png" % (city, seq, f3_id)))
-            f3_img = imageio.imread(f3_path)
-            f3_img = np.array(f3_img, dtype=np.uint8)
+            depth = imageio.imread(depth_path)
+            depth = np.array(depth, dtype=np.uint8)
+            depth = torch.from_numpy(depth).float()
+            depth_reshaped = depth.reshape(1, depth.shape[0], depth.shape[1])
+            depth_labels.append(depth_reshaped)
 
-            f2_path = os.path.join(self.videos_base, city, ("%s_%s_%06d_leftImg8bit.png" % (city, seq, f2_id)))
-            f2_img = imageio.imread(f2_path)
-            f2_img = np.array(f2_img, dtype=np.uint8)
-
-            f1_path = os.path.join(self.videos_base, city, ("%s_%s_%06d_leftImg8bit.png" % (city, seq, f1_id)))
-            f1_img = imageio.imread(f1_path)
-            f1_img = np.array(f1_img, dtype=np.uint8)
+            images = torch.stack(images, dim=0)
+            depth_labels = torch.stack(depth_labels, dim=0)
+            segmentation_labels = torch.stack(segmentation_labels, dim=0)
 
             if self.augmentations is not None:
-                [f4_img, f3_img, f2_img, f1_img], lbl = self.augmentations([f4_img, f3_img, f2_img, f1_img], lbl)
-
-            f4_img = f4_img.float()
-            f3_img = f3_img.float()
-            f2_img = f2_img.float()
-            f1_img = f1_img.float()
-            lbl = torch.from_numpy(lbl).long()
-
-            if self.path_num == 4:
-                return [f1_img, f2_img, f3_img, f4_img], lbl
-            else:
-                return [f3_img, f4_img], lbl
+                images = self.augmentations(images)
+                depth_labels = self.augmentations(depth_labels)
+                segmentation_labels = self.augmentations(segmentation_labels)
+                
+        return images, depth_labels, segmentation_labels
 
     def decode_segmap(self, temp):
         r = temp.copy()
