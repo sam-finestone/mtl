@@ -21,12 +21,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ########################################## STATIC TRAINING/EVALUTATION ########################################
 
-def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt, task, LOG_FILE):
+def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt, scheduler, task, LOG_FILE):
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     loss_running = AverageMeter('Loss', ':.4e')
     acc_running = AverageMeter('Accuracy', ':.3f')
-    error_running = AverageMeter('Absolute error', ':.3f')
+    abs_error_running = AverageMeter('Absolute error', ':.3f')
+    rel_error_running = AverageMeter('Relative error', ':.3f')
+
     if task == 'segmentation':
         progress = ProgressMeter(
             len(train_loader),
@@ -35,12 +37,12 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
     if task == 'depth':
         progress = ProgressMeter(
             len(train_loader),
-            [batch_time, data_time, loss_running, error_running],
+            [batch_time, data_time, loss_running, abs_error_running, rel_error_running],
             prefix="Train, epoch: [{}]".format(epoch))
     if task == 'segmentation_depth':
         progress = ProgressMeter(
             len(train_loader),
-            [batch_time, data_time, loss_running, acc_running, error_running],
+            [batch_time, data_time, loss_running, acc_running, abs_error_running, rel_error_running],
             prefix="Train, epoch: [{}]".format(epoch))
 
     model.train()
@@ -86,7 +88,8 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             acc_running.update(acc, bs)
             # get depth metric
             abs_err, rel_err = depth_error(depth_pred, gt_depth)
-            error_running.update(abs_err)
+            abs_error_running.update(abs_err)
+            rel_error_running.update(rel_err)
 
         if task == 'segmentation':
             task_pred = model(inputs)
@@ -122,7 +125,8 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             loss = loss.item()
             loss_running.update(loss, bs)
             abs_err, rel_err = depth_error(task_pred, gt_depth)
-            error_running.update(abs_err)
+            abs_error_running.update(abs_err)
+            rel_error_running.update(rel_err)
         # if task == 'normal':
 
         # output training info
@@ -142,12 +146,13 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
 
         # epoch_loss_model += loss.item()
         # avg_cost[:6] += cost[:6] / len(train_loader)
-
+    # reduce the learning rate
+    scheduler.step(loss_running.avg)
     # returns the average loss per decoder and the loss of the encoder per epoch
     # epoch_train_loss = epoch_loss_model / len(train_loader)
     # return epoch_train_loss, cost, avg_cost
     if task == 'depth':
-        return loss_running.avg, error_running.avg
+        return loss_running.avg, abs_error_running.avg, rel_error_running.avg
 
     return loss_running.avg, acc_running.avg
 
@@ -160,7 +165,8 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
     data_time = AverageMeter('Data', ':6.3f')
     loss_running = AverageMeter('Loss', ':.4e')
     acc_running = AverageMeter('Accuracy', ':.4e')
-    error_running = AverageMeter('Absolute error', ':.3f')
+    abs_error_running = AverageMeter('Absolute error', ':.3f')
+    rel_error_running = AverageMeter('Relative error', ':.3f')
 
     if task == 'segmentation':
         iou = iouCalc(classLabels, validClasses, voidClass=void)
@@ -172,14 +178,14 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
     if task == 'depth':
         progress = ProgressMeter(
             len(test_loader),
-            [batch_time, data_time, loss_running, error_running],
+            [batch_time, data_time, loss_running, abs_error_running, rel_error_running],
             prefix="Train, epoch: [{}]".format(epoch))
 
     if task == 'segmentation_depth':
         iou = iouCalc(classLabels, validClasses, voidClass=void)
         progress = ProgressMeter(
             len(test_loader),
-            [batch_time, data_time, loss_running, acc_running, error_running],
+            [batch_time, data_time, loss_running, acc_running, abs_error_running, rel_error_running],
             prefix="Train, epoch: [{}]".format(epoch))
 
     single_task_model.eval()
@@ -194,11 +200,9 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
             task_pred = single_task_model(inputs)
 
             if task == 'segmentation':
-                loss = criterion(task_pred, gt_semantic_labels)
-                # accumulate label prediction for every pixel in training images
-                # conf_mat.update(task_pred.argmax(1).flatten(), gt_semantic_labels.flatten())
-                # cost[0] = loss.item()
-                # avg_cost[1:3] = np.array(conf_mat.get_metrics())
+                loss = criterion(task_pred, gt_semantic_labels.squeeze().long())
+                bs = inputs.size(0)
+                loss = loss.item()
                 loss_running.update(loss, bs)
                 task_pred = torch.argmax(gt_semantic_labels, 1)
                 corrects = torch.sum(task_pred == gt_semantic_labels.data)
@@ -207,9 +211,17 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                 res = 512 * 256
                 acc = corrects.double() / (bs * res - nvoid)  # correct/(batch_size*resolution-voids)
                 acc_running.update(acc, bs)
-
+                # print(task_pred.squeeze().shape)
+                # print(gt_semantic_labels.squeeze().shape)
+                # torch.set_printoptions(profile="full")
+                # t = task_pred.squeeze()
+                # print(t[0, :, :])
+                # b = gt_semantic_labels.squeeze()
+                # print(b[0,:,:])
+                # torch.set_printoptions(profile="default")
                 # Calculate IoU scores of current batch
-                iou.evaluateBatch(task_pred, labels)
+                # iou.evaluateBatch(task_pred.squeeze(), gt_semantic_labels.squeeze())
+                # iou.evaluateBatch(decode_pred(task_pred.squeeze(), validClasses), gt_semantic_labels.squeeze())
 
                 # Save visualizations of first batch
                 if batch_idx == 0 and maskColors is not None:
@@ -234,7 +246,8 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                 loss = loss.item()
                 loss_running.update(loss, bs)
                 abs_err, rel_err = depth_error(task_pred, gt_depth)
-                error_running.update(abs_err)
+                abs_error_running.update(abs_err)
+                rel_error_running.update(rel_err)
 
         # compute mIoU and acc
         # measure elapsed time
@@ -250,9 +263,18 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
     # epoch_test_loss = epoch_loss_model / len(test_loader)
     # return epoch_test_loss, cost, avg_cost
     if task == 'depth':
-        return error_running.avg, loss_running.avg
+        return rel_error_running.avg, abs_error_running.avg, loss_running.avg
 
-    miou = iou.outputScores()
+    # miou = iou.outputScores()
     print('Accuracy      : {:5.3f}'.format(acc_running.avg))
     print('---------------------')
     return acc_running.avg, loss_running.avg, miou
+
+# def decode_pred(input, validClasses):
+#     # Put all void classes to zero
+#     for i in range(input.size(0)):
+#         for _predc in range(len(validClasses)):
+#             input[i, input == _predc, input == _predc] = validClasses[_predc]
+#     return input
+
+

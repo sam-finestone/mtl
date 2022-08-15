@@ -1,7 +1,8 @@
 import numpy as np
 import torch
 import torch.nn as nn
-
+import sys
+import matplotlib.pyplot as plt
 
 # mIoU and Acc. formula: accumulate every pixel and average across all pixels in all images
 class ConfMatrix(object):
@@ -276,23 +277,36 @@ Plot learning curves
 """
 
 
-def plot_learning_curves(metrics, args):
-    x = np.arange(args.epochs)
+def plot_learning_curves(metrics, epochs, save_img_path, task):
+    x = np.arange(epochs)
     fig, ax1 = plt.subplots()
     ax1.set_xlabel('epochs')
     ax1.set_ylabel('loss')
-    ln1 = ax1.plot(x, metrics['train_loss'], color='tab:red')
-    ln2 = ax1.plot(x, metrics['val_loss'], color='tab:red', linestyle='dashed')
-    ax1.grid()
-    ax2 = ax1.twinx()
-    ax2.set_ylabel('accuracy')
-    ln3 = ax2.plot(x, metrics['train_acc'], color='tab:blue')
-    ln4 = ax2.plot(x, metrics['val_acc'], color='tab:blue', linestyle='dashed')
-    ln5 = ax2.plot(x, metrics['miou'], color='tab:green')
-    lns = ln1 + ln2 + ln3 + ln4 + ln5
-    plt.legend(lns, ['Train loss', 'Validation loss', 'Train accuracy', 'Validation accuracy', 'mIoU'])
-    plt.tight_layout()
-    plt.savefig(args.save_path + '/learning_curve.png', bbox_inches='tight')
+    if task == 'segmentation':
+        ln1 = ax1.plot(x, metrics['train_loss'], color='tab:red')
+        ln2 = ax1.plot(x, metrics['val_loss'], color='tab:red', linestyle='dashed')
+        ax1.grid()
+        ax2 = ax1.twinx()
+        ax2.set_ylabel('accuracy')
+        ln3 = ax2.plot(x, metrics['train_acc'], color='tab:blue')
+        ln4 = ax2.plot(x, metrics['val_acc'], color='tab:blue', linestyle='dashed')
+        ln5 = ax2.plot(x, metrics['miou'], color='tab:green')
+        lns = ln1 + ln2 + ln3 + ln4 + ln5
+        plt.legend(lns, ['Train loss', 'Validation loss', 'Train accuracy', 'Validation accuracy', 'mIoU'])
+        plt.tight_layout()
+        plt.savefig(save_img_path + '/learning_curve.png', bbox_inches='tight')
+    elif task == 'depth':
+        ln1 = ax1.plot(x, metrics['train_loss'], color='tab:red')
+        ln2 = ax1.plot(x, metrics['val_loss'], color='tab:red', linestyle='dashed')
+        ax1.grid()
+        ax2 = ax1.twinx()
+        ax2.set_ylabel('Abs. Error')
+        ln3 = ax2.plot(x, metrics['train_abs_error'], color='tab:blue')
+        ln4 = ax2.plot(x, metrics['val_abs_error'], color='tab:blue', linestyle='dashed')
+        lns = ln1 + ln2 + ln3 + ln4
+        plt.legend(lns, ['Train loss', 'Validation loss', 'Train Absolute Error', 'Validation Absolute Error'])
+        plt.tight_layout()
+        plt.savefig(save_img_path + '/learning_curve.png', bbox_inches='tight')
 
 class SegmentationMetrics(object):
     r"""Calculate common metrics in semantic segmentation to evalueate model preformance.
