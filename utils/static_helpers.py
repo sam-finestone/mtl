@@ -265,7 +265,7 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
     if task == 'depth':
         return rel_error_running.avg, abs_error_running.avg, loss_running.avg
 
-    # miou = iou.outputScores()
+    miou = iou.outputScores()
     print('Accuracy      : {:5.3f}'.format(acc_running.avg))
     print('---------------------')
     return acc_running.avg, loss_running.avg, miou
