@@ -147,20 +147,20 @@ class MultiTaskModel(nn.Module):
         writer.add_histogram("weights/MILADecoder/fc2/bias", model.fc2.bias.data, step)
 
 
-class SingleTaskModel(nn.Module):
-    ''' This class contains the implementation of the slowfast model for a single task
+class MultiTaskModel1(nn.Module):
+    ''' This class contains the implementation of the slowfast model.
+    https://github.com/r1c7/SlowFastNetworks/blob/master/lib/slowfastnet.py
             Args:
                 enocder: A integer indicating the embedding size.
                 decoder: A integer indicating the size of output dimension.
                 number_frames: A integer indicating the hidden size of rnn.
-                task: single task being
     '''
 
-    def __init__(self, encoder_slow, encoder_fast, task_decoder, k=5, version='mila'):
+    def __init__(self, encoder_slow, encoder_fast, list_decoders, k=5, version='mila', task_channels=[19, 3, 1]):
         super().__init__()
-        self.encoder_slow = encoder_slow
-        self.encoder_fast = encoder_fast
-        self.task_decoder = task_decoder
+        self.fast = encoder_slow
+        self.slow = encoder_fast
+        self.decoders = list_decoders
         # self.depth_decoder = depth_decoder
         self.K = k
         # self.atten = attention
@@ -171,7 +171,8 @@ class SingleTaskModel(nn.Module):
     def forward(self, input):
         # [b, t, c, h, w]
         # Get the keyframes and non-keyframes for slow/fast setting
-        keyframes, non_keyframes, list_kf_indicies = self.get_keyframes(input)
+        # keyframes, non_keyframes, list_kf_indicies = self.get_keyframes(input)
+        keyframes, non_keyframes = self.keyframes(input)
 
         # change the dimensions of the input tensor for the deeplabv3 encoder and obtain encoder features
         enc_slow_ftrs, batch_size, t_dim_slow = self.run_encoder(keyframes, self.encoder_slow)
@@ -184,20 +185,30 @@ class SingleTaskModel(nn.Module):
         if self.version == 'basic':
             enc_combined_ftrs = torch.cat([enc_fast_ftrs, enc_slow_ftrs_tiled], dim=1)
             enc_slow_ftrs = self.conv(enc_slow_ftrs)
-            seg_slow_pred = self.task_decoder(enc_slow_ftrs)
-            seg_fast_pred = self.task_decoder(enc_combined_ftrs)
+            # run a decoder for each task
+            task_slow_pred = []
+            task_combin_pred = []
+            task_predictions = []
+            for task_decoder in self.decoders:
+                # Reshape the output tensors to a [B, T, C, H, W]
+                output_slow = self.reshape_output(task_decoder(enc_slow_ftrs), batch_size, t_dim_slow)
+                output_fast = self.reshape_output(task_decoder(enc_combined_ftrs), batch_size, t_dim_fast)
+                pred = self.stack_predictions(output_slow, output_fast, list_kf_indicies)
+                task_slow_pred.append(output_slow)
+                task_combin_pred.append(output_fast)
+                task_predictions.append(pred)
         else:
-            seg_slow_pred, se_output_slow = self.task_decoder(enc_slow_ftrs, self.fast_se_feature)
-            seg_fast_pred, se_output_fast = self.task_decoder(enc_fast_ftrs, se_output_slow)
+            seg_slow_pred, se_output_slow = self.seg_decoder(enc_slow_ftrs, self.fast_se_feature)
+            seg_fast_pred, se_output_fast = self.seg_decoder(enc_fast_ftrs, se_output_slow)
             self.fast_se_feature = se_output_fast
 
         # Reshape the output tensors to a [B, T, C, H, W]
-        output_seg_slow = self.reshape_output(seg_slow_pred, batch_size, t_dim_slow)
-        output_seg_fast = self.reshape_output(seg_fast_pred, batch_size, t_dim_fast)
+        # output_seg_slow = self.reshape_output(seg_slow_pred, batch_size, t_dim_slow)
+        # output_seg_fast = self.reshape_output(seg_fast_pred, batch_size, t_dim_fast)
 
         # want to stake the predicted frames back in order of the T
-        segmentation_pred = self.stack_predictions(output_seg_slow, output_seg_fast, list_kf_indicies)
-        return segmentation_pred
+        # segmentation_pred = self.stack_predictions(output_seg_slow, output_seg_fast, list_kf_indicies)
+        return task_predictions
 
     def get_keyframes(self, input):
         # input size dimension - [B, T, C, H, W]
@@ -208,6 +219,12 @@ class SingleTaskModel(nn.Module):
         keyframes = input[:, list_kf_indicies, :, :, :]
         non_keyframes = input[:, list_non_kf_indicies, :, :, :]
         return keyframes, non_keyframes, list_kf_indicies, list_non_kf_indicies
+
+    def keyframes(self, input):
+        f_mask = [1,0,0,0,1]
+        n_mask = [0,1,1,1,0]
+        return input[:, f_mask], input[:, n_mask]
+
 
     def stack_predictions(self, output_slow, output_combined, list_kf_indicies):
         t_dim_slow = output_slow.shape[1]
@@ -251,6 +268,19 @@ class SingleTaskModel(nn.Module):
         writer.add_histogram("weights/MILADecoder/fc1/bias", model.fc1.bias.data, step)
         writer.add_histogram("weights/MILADecoder/fc2/weight", model.fc2.weight.data, step)
         writer.add_histogram("weights/MILADecoder/fc2/bias", model.fc2.bias.data, step)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
