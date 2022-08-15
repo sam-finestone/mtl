@@ -3,10 +3,12 @@ model:
     backbone:
         encoder:
             type: deeplabv3
-            resnet_version: resnet50 # resnet50 or resnet18 or resnset101
+            resnet_slow: resnet50 # resnet50 or resnet18 or resnset101
+            resnet_fast: resnet18 # resnet50 or resnet18 or resnset101
     dropout: 0.5
     path_num: 2
     window_size: 5
+    k: 2
     frames_per_segment: 48
     tasks: depth # depth or segmentation
     task_classes: 1
@@ -18,7 +20,7 @@ data:
     test_split: test
     img_rows: 1025
     img_cols: 2049
-    path: /mnt/c44578a3-8e98-4fc3-a8b4-72266618fb8a/sam_dataset/data/cityscapes_static
+    path: /mnt/c44578a3-8e98-4fc3-a8b4-72266618fb8a/sam_dataset/data/cityscapes_temporal
 
 training:
     n_workers: 8
@@ -51,7 +53,7 @@ training:
         rscale: [0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
         rcrop: [769,769]
         colornorm: [[0.485, 0.456, 0.406], [0.229, 0.224, 0.225]]
-    resume: #/home/sam/project/Model/Checkpoints/depth/best_weights.pth.tar
+    resume: #/home/sam/project/Model/Temporal/Checkpoints/depth/best_weights.pth.tar
     visdom: False
 
 validating:

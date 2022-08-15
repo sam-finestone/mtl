@@ -16,6 +16,7 @@ from loss.loss import model_fit, DiceLoss, DiceBCELoss
 import numpy as np
 import logging
 import cv2
+import matplotlib.pyplot as plt
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -220,7 +221,7 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                 # print(b[0,:,:])
                 # torch.set_printoptions(profile="default")
                 # Calculate IoU scores of current batch
-                # iou.evaluateBatch(task_pred.squeeze(), gt_semantic_labels.squeeze())
+                iou.evaluateBatch(task_pred.squeeze(), gt_semantic_labels.squeeze())
                 # iou.evaluateBatch(decode_pred(task_pred.squeeze(), validClasses), gt_semantic_labels.squeeze())
 
                 # Save visualizations of first batch
@@ -248,6 +249,30 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                 abs_err, rel_err = depth_error(task_pred, gt_depth)
                 abs_error_running.update(abs_err)
                 rel_error_running.update(rel_err)
+
+                # Save visualizations of first batch
+                if batch_idx == 0:
+                    for i in range(inputs.size(0)):
+                        filename = filepath[i]
+                        imgs = inputs.data.cpu().numpy()
+                        gt_depth_ = gt_depth.data.cpu().numpy()
+                        pred_depth_ = task_pred.data.cpu().numpy()
+                        # Only save inputs and labels once
+                        if epoch == 0:
+                            for j in range(imgs.shape[0]):
+                                plt.set_cmap('jet')
+                                fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
+                                axs1.imshow(np.transpose(imgs[i], (1, 2, 0)))
+                                # plt.show()
+                                vmin, vmax = 0, 10000 / 65536.
+                                axs2.imshow(pred_depth_[j][0], vmin=vmin, vmax=vmax)
+                                # plt.colorbar()
+                                # plt.show()
+                                axs3.imshow(gt_depth_[j][0], vmin=vmin, vmax=vmax)
+                                # plt.colorbar()
+                                # plt.show()
+                                fig.savefig(folder + '/images/{}.png'.format(filename+'_image_'+str(j)))
+                                plt.close(fig)
 
         # compute mIoU and acc
         # measure elapsed time

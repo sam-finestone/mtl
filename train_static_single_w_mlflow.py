@@ -20,6 +20,7 @@ from utils.train_helpers import *
 from utils.static_helpers import static_single_task_trainer, static_test_single_task
 from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback
 from utils.metrics import plot_learning_curves
+from loss.loss import InverseDepthL1Loss
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 parser = argparse.ArgumentParser()
@@ -227,6 +228,8 @@ if TASK == 'segmentation':
     criterion = torch.nn.CrossEntropyLoss(ignore_index=train_set.ignore_index)
 
 elif TASK == 'depth':
+    if not os.path.exists(os.path.join(SAMPLES_PATH, 'images')):
+        os.makedirs(os.path.join(SAMPLES_PATH, 'images'))
     # Initialize metrics
     metrics = {'train_loss': [],
                'val_loss': [],
@@ -234,8 +237,9 @@ elif TASK == 'depth':
                'train_rel_error': [],
                'val_abs_error': [],
                'val_rel_error': []}
-    criterion = torch.nn.MSELoss()
-    # torch.nn.L1Loss()
+    # criterion = torch.nn.MSELoss()
+    # criterion = torch.nn.L1Loss()
+    criterion = InverseDepthL1Loss()
 
 print('Beginning training...')
 with mlflow.start_run():
@@ -286,7 +290,7 @@ with mlflow.start_run():
             # Write segmentation logs
             with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
                 epoch_log.write('{}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f}\n'.format(
-                    epoch, train_loss, val_loss, train_acc, val_acc, miou))
+                                epoch, train_loss, val_loss, train_acc, val_acc, miou))
             mlflow.log_artifact(os.path.join(LOG_FILE, 'log_epoch.txt'))
 
             # Save checkpoint
@@ -308,7 +312,7 @@ with mlflow.start_run():
                 }, MODEL_SAVE_PATH + '/best_weights.pth.tar')
                 mlflow.log_metric('best_miou', best_miou)
                 print("\nLogging the trained model as a run artifact...")
-                mlflow.pytorch.log_model(model, artifact_path="pytorch-model", pickle_module=pickle)
+                mlflow.pytorch.log_model(model, artifact_path="pytorch-"+TASK+"-best", pickle_module=pickle)
 
         elif TASK == 'depth':
             train_loss, train_abs_err, train_rel_err = static_single_task_trainer(epoch, criterion, train_dataloader,
@@ -353,7 +357,7 @@ with mlflow.start_run():
 
             # # Since the model was logged as an artifact, it can be loaded to make predictions
             print("\nLogging the trained model as a run artifact...")
-            mlflow.pytorch.log_model(model, artifact_path="pytorch-model-trained", pickle_module=pickle)
+            mlflow.pytorch.log_model(model, artifact_path="pytorch-"+TASK+"-trained", pickle_module=pickle)
             print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(), "pytorch-model"))
 
             # Save best model to file
@@ -366,7 +370,7 @@ with mlflow.start_run():
                 }, MODEL_SAVE_PATH + '/best_weights.pth.tar')
                 mlflow.log_metric('lowest_depth_error', lowest_depth_error)
                 print("\nLogging the trained model as a run artifact...")
-                mlflow.pytorch.log_model(model, artifact_path="pytorch-model-best", pickle_module=pickle)
+                mlflow.pytorch.log_model(model, artifact_path="pytorch-"+TASK+"-best", pickle_module=pickle)
 
         # Track the metrics in mlflow
         for key, value in metrics.items():
@@ -378,7 +382,7 @@ with mlflow.start_run():
 
     # Since the model was logged as an artifact, it can be loaded to make predictions
     print("\nLoading model to make predictions on test set")
-    loaded_model = mlflow.pytorch.load_model(mlflow.get_artifact_uri("pytorch-model-best"))
+    loaded_model = mlflow.pytorch.load_model(mlflow.get_artifact_uri("pytorch-"+TASK+"-best"))
 
     # run on test set
     print('--- Testing ---')
