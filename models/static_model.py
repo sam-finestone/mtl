@@ -10,7 +10,6 @@ from PIL import Image
 from tensorboardX import SummaryWriter
 from models.deeplabv3_encoder import DeepLabv3
 
-
 class StaticTaskModel(nn.Module):
     ''' This class contains the implementation of a static model for a single task
             Args:
@@ -18,20 +17,26 @@ class StaticTaskModel(nn.Module):
                 decoder: A integer indicating the size of output dimension.
     '''
 
-    def __init__(self, encoder, decoder):
+    def __init__(self, encoder, decoder, task):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
+        self.task = task
         # self.atten = attention
         # self.version = version
 
     def forward(self, input):
         # [b, c, h, w]
-        print(input.shape)
+        # print(input.shape)
         encoder_ftrs = self.encoder(input)
-        # print(encoder_ftrs.shape) torch.Size([8, 256, 16, 32])
-        segmentation_pred = self.decoder(encoder_ftrs)
-        return segmentation_pred
+        # print(encoder_ftrs.shape)
+        # print(encoder_ftrs.shape) torch.Size([8, 256, 16, 32]) or torch.Size([4, 256, 8, 16]) with (128,256)
+        if self.task == 'depth' or self.task == 'segmentation':
+            task_predictions = self.decoder(encoder_ftrs)
+            return task_predictions
+        # both tasks
+        depth_pred, seg_pred = self.decoder(encoder_ftrs)
+        return depth_pred, seg_pred
 
     # function to log the weights of the model
     # def log_weights(self, step):

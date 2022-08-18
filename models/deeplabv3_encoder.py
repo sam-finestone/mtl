@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from models.resnet_encoder import ResNet50
+# from resnet_encoder import ResNet50
 from torchvision import models
 from tensorboardX import SummaryWriter
 

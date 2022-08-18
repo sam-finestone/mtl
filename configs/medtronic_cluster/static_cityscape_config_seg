@@ -21,8 +21,8 @@ data:
     path: /mnt/c44578a3-8e98-4fc3-a8b4-72266618fb8a/sam_dataset/data/cityscapes_static
 
 training:
-    n_workers: 8
-    train_iters: 10
+    n_workers: 4
+    train_iters: 200
     batch_size: 8
     val_interval: 10
     print_interval: 2
@@ -35,14 +35,15 @@ training:
         name: adaoptimizer
         momentum: 0.9
         wd: 1.0e-4
-        lr0: 1.0e-2
+        lr: 1.0e-4
         max_iter: 40000
         power: 0.9
         warmup_steps: 1000
         warmup_start_lr: 1.0e-5
+    lr_schedule:
     scheduler:
-        step: 5
-        gamma: 0.1
+        step: 100
+        gamma: 0.5
     train_augmentations:
         rotate: 5
         colorjtr: [0.5,0.5,0.5]

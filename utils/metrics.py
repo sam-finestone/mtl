@@ -105,10 +105,10 @@ class iouCalc():
         self.validClasses = validClasses
         self.voidClass = voidClass
         self.evalClasses = [l for l in validClasses if l != voidClass]
-
+        self.class_map = dict(zip(self.validClasses, range(19)))
         self.perImageStats = []
         self.nbPixels = 0
-        self.confMatrix = np.zeros(shape=(len(self.validClasses), len(self.validClasses)), dtype=np.ulonglong)
+        self.confMatrix = np.zeros(shape=(len(self.validClasses)+1, len(self.validClasses)+1), dtype=np.ulonglong)
 
         # Init IoU log files
         self.headerStr = 'epoch, '
@@ -119,7 +119,7 @@ class iouCalc():
     def clear(self):
         self.perImageStats = []
         self.nbPixels = 0
-        self.confMatrix = np.zeros(shape=(len(self.validClasses), len(self.validClasses)), dtype=np.ulonglong)
+        self.confMatrix = np.zeros(shape=(len(self.validClasses)+1, len(self.validClasses)+1), dtype=np.ulonglong)
 
     def getIouScoreForLabel(self, label):
         # Calculate and return IOU score for a particular label (train_id)
@@ -162,24 +162,42 @@ class iouCalc():
         for i in range(predictionBatch.shape[0]):
             predictionImg = predictionBatch[i, :, :]
             groundTruthImg = groundTruthBatch[i, :, :]
+            # Convert the ids to valid class ids
+            imgHeight = predictionImg.shape[0]
+            imgWidth = predictionImg.shape[1]
 
+            groundTruthImg = groundTruthImg.flatten()
+            predictionImg = predictionImg.flatten()
+            predictionImg = np.array(list(map(lambda x: self.validClasses[x], predictionImg)))
+            groundTruthImg = np.array(list(map(lambda x: self.validClasses[x], groundTruthImg)))
+
+            # reshape tensor
+            predictionImg = np.reshape(predictionImg, (imgHeight, imgWidth))
+            groundTruthImg = np.reshape(groundTruthImg, (imgHeight, imgWidth))
+
+            print(groundTruthImg)
+            print(predictionImg)
+            print(predictionImg.shape)
+            print(groundTruthImg.shape)
             # Check for equal image sizes
             assert predictionImg.shape == groundTruthImg.shape, 'Image shapes do not match.'
             assert len(predictionImg.shape) == 2, 'Predicted image has multiple channels.'
 
-            imgWidth = predictionImg.shape[0]
-            imgHeight = predictionImg.shape[1]
+            imgHeight = predictionImg.shape[0]
+            imgWidth = predictionImg.shape[1]
             nbPixels = imgWidth * imgHeight
 
             # Evaluate images
-            encoding_value = max(groundTruthImg.max(), predictionImg.max()).astype(np.int32) + 1
+            encoding_value = max(groundTruthImg.max(), predictionImg.max()).astype(np.int32)+1
             encoded = (groundTruthImg.astype(np.int32) * encoding_value) + predictionImg
 
             values, cnt = np.unique(encoded, return_counts=True)
-
             for value, c in zip(values, cnt):
                 pred_id = value % encoding_value
                 gt_id = int((value - pred_id) / encoding_value)
+                # pred_id = self.validClasses.index()
+                print(pred_id)
+                print(gt_id)
                 if not gt_id in self.validClasses:
                     printError('Unknown label with id {:}'.format(gt_id))
                 self.confMatrix[gt_id][pred_id] += c
@@ -266,8 +284,13 @@ def vislbl(label, mask_colors):
         label = label[:, :, 0]
 
     # Convert train_ids to colors
-    label = mask_colors[label]
-    return label
+    # label = torch.apply()
+    converted_to_color = np.zeros((128, 256, 3), dtype=np.uint8)
+    for i in range(128):
+        for j in range(256):
+            converted_to_color[i, j, :] = mask_colors[label[i, j]]
+    # label = mask_colors[label]
+    return converted_to_color
 
 
 """
@@ -290,9 +313,9 @@ def plot_learning_curves(metrics, epochs, save_img_path, task):
         ax2.set_ylabel('accuracy')
         ln3 = ax2.plot(x, metrics['train_acc'], color='tab:blue')
         ln4 = ax2.plot(x, metrics['val_acc'], color='tab:blue', linestyle='dashed')
-        ln5 = ax2.plot(x, metrics['miou'], color='tab:green')
+        ln5 = ax2.plot(x, metrics['val_miou'], color='tab:green')
         lns = ln1 + ln2 + ln3 + ln4 + ln5
-        plt.legend(lns, ['Train loss', 'Validation loss', 'Train accuracy', 'Validation accuracy', 'mIoU'])
+        plt.legend(lns, ['Train loss', 'Validation loss', 'Train accuracy', 'Validation accuracy', 'Val mIoU'])
         plt.tight_layout()
         plt.savefig(save_img_path + '/learning_curve.png', bbox_inches='tight')
     elif task == 'depth':
@@ -307,6 +330,33 @@ def plot_learning_curves(metrics, epochs, save_img_path, task):
         plt.legend(lns, ['Train loss', 'Validation loss', 'Train Absolute Error', 'Validation Absolute Error'])
         plt.tight_layout()
         plt.savefig(save_img_path + '/learning_curve.png', bbox_inches='tight')
+
+    elif task == 'depth_segmentation':
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+        ax1.plot(x, metrics['train_loss'], color='tab:blue')
+        ax1.plot(x, metrics['val_loss'], color='tab:red')
+        ax1.set_xlabel('Epochs')
+        ax1.set_ylabel('Loss')
+        ax1.grid()
+        # ax2 = ax1.twinx()
+
+        ax2.plot(x, metrics['train_abs_error'], color='tab:blue')
+        ax2.plot(x, metrics['val_abs_error'], color='tab:red')
+        ax2.set_xlabel('Epochs')
+        ax2.set_ylabel('Error')
+        ax2.grid()
+
+        ax3.plot(x, metrics['train_acc'], color='tab:blue')
+        ax3.plot(x, metrics['val_acc'], color='tab:blue', linestyle='dashed')
+        ax3.plot(x, metrics['train_miou'], color='tab:red')
+        ax3.plot(x, metrics['val_miou'], color='tab:red', linestyle='dashed')
+        ax3.set_xlabel('Epochs')
+        ax3.set_ylabel('Accuracy/mIou')
+        ax3.grid()
+        # lns = ln1 + ln2 + ln3 + ln4
+        # plt.legend(lns, ['Train loss', 'Validation loss', 'Train Absolute Error', 'Validation Absolute Error'])
+        fig.tight_layout()
+        fig.savefig(save_img_path + '/learning_curve.png', bbox_inches='tight')
 
 class SegmentationMetrics(object):
     r"""Calculate common metrics in semantic segmentation to evalueate model preformance.
@@ -492,3 +542,33 @@ class BinaryMetrics():
                                                                                                     dtype=torch.float),
                                                                                           activated_pred)
         return [pixel_acc, dice, precision, specificity, recall]
+
+def compute_miou(x_pred, x_output):
+    # evaluation metircs from https://github.com/lorenmt/mtan
+    _, x_pred_label = torch.max(x_pred, dim=1)
+    x_output_label = x_output
+    batch_size = x_pred.size(0)
+    for i in range(batch_size):
+        true_class = 0
+        first_switch = True
+        for j in range(20):
+            pred_mask = torch.eq(x_pred_label[i],
+                                 j * torch.ones(x_pred_label[i].shape).type(torch.LongTensor).cuda())
+            true_mask = torch.eq(x_output_label[i],
+                                 j * torch.ones(x_output_label[i].shape).type(torch.LongTensor).cuda())
+            mask_comb = pred_mask.type(torch.FloatTensor) + true_mask.type(torch.FloatTensor)
+            union = torch.sum((mask_comb > 0).type(torch.FloatTensor))
+            intsec = torch.sum((mask_comb > 1).type(torch.FloatTensor))
+            if union == 0:
+                continue
+            if first_switch:
+                class_prob = intsec / union
+                first_switch = False
+            else:
+                class_prob = intsec / union + class_prob
+            true_class += 1
+        if i == 0:
+            batch_avg = class_prob / true_class
+        else:
+            batch_avg = class_prob / true_class + batch_avg
+    return batch_avg / batch_size

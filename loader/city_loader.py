@@ -110,7 +110,7 @@ class cityscapesLoader2(data.Dataset):
         self.augmentations = augmentations
         self.test_mode = test_mode
         self.model_name = model_name
-        self.n_classes = 20
+        self.n_classes = 19
         self.files = {}
         self.seg_files = {}
         self.colours = self.colors
@@ -122,7 +122,7 @@ class cityscapesLoader2(data.Dataset):
         # self.seg_files[split] = recursive_glob_set(rootdir=self.images_base, suffix=".png")
         # print(self.files[split][:500])
         # self.frame_start_indices = self.get_start_indices()
-        self.void_classes = [0, 1, 2, 3, 4, 5, 6, 9, 10, 14, 15, 16, 18, 29, 30, -1]
+        self.void_classes = [1, 2, 3, 4, 5, 6, 9, 10, 14, 15, 16, 18, 29, 30, -1]
         self.valid_classes = [
             0,
             7,

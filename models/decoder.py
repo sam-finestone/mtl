@@ -1,9 +1,11 @@
+import sys
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 # from resnet_encoder import Block
 from models.attention.attention import LocalContextAttentionBlock
-from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback, SynchronizedBatchNorm2d
+from sync_batchnorm.batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback, SynchronizedBatchNorm2d
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -223,6 +225,16 @@ class SegDecoder(nn.Module):
         super(SegDecoder, self).__init__()
         # if backbone == "resnet" or backbone == "drn":
         #     low_level_inplanes = 256
+        self.input_height = input_dim
+        # if self.input_height == 256:
+        #     self.input_width = 512
+        # elif self.input_height == 128:
+        #     self.input_width = 256
+        # elif self.input_height == 512:
+        #     self.input_width = 1048
+        # else:
+        #     print('Wrong input dim')
+        #     sys.exit()
         self.conv1 = nn.Conv2d(input_dim, 256, 1, bias=False)
         self.bn1 = BatchNorm(256)
         self.relu = nn.ReLU()
@@ -244,7 +256,7 @@ class SegDecoder(nn.Module):
         x = self.bn1(x)
         x = self.relu(x)
         # x = torch.cat((x, low_level_feat), dim=1)
-        x = F.interpolate(x, size=(256, 512), mode="bilinear", align_corners=True)
+        x = F.interpolate(x, size=(128, 256), mode="bilinear", align_corners=True)
         x = self.last_conv(x)
         return x
 
@@ -287,7 +299,7 @@ class DepthDecoder(nn.Module):
         x = self.bn1(x)
         x = self.relu(x)
         # x = torch.cat((x, low_level_feat), dim=1)
-        x = F.interpolate(x, size=(256, 512), mode="bilinear", align_corners=True)
+        x = F.interpolate(x, size=(128, 256), mode="bilinear", align_corners=True)
         x = self.last_conv(x)
         x = self.softplus(x)
         return x
@@ -304,9 +316,9 @@ class DepthDecoder(nn.Module):
                 m.bias.data.zero_()
 
 
-class MutliDecoder(nn.Module):
+class MultiDecoder(nn.Module):
     def __init__(self, input_dim, num_classes, drop_out, BatchNorm):
-        super(MutliDecoder, self).__init__()
+        super(MultiDecoder, self).__init__()
         # if backbone == "resnet" or backbone == "drn":
         #     low_level_inplanes = 256
 
@@ -323,7 +335,7 @@ class MutliDecoder(nn.Module):
             BatchNorm(256),
             nn.ReLU(),
             nn.Dropout(drop_out),
-            nn.Conv2d(256, num_classes[0], kernel_size=1, stride=1),
+            nn.Conv2d(256, num_classes[1], kernel_size=1, stride=1),
         )
 
         # Depth
@@ -339,7 +351,7 @@ class MutliDecoder(nn.Module):
             BatchNorm(256),
             nn.ReLU(),
             nn.Dropout(drop_out),
-            nn.Conv2d(256, num_classes[1], kernel_size=1, stride=1),
+            nn.Conv2d(256, num_classes[0], kernel_size=1, stride=1),
         )
         self.depth_softplus = torch.nn.Softplus(beta=1, threshold=20)
 
@@ -351,7 +363,7 @@ class MutliDecoder(nn.Module):
         x2 = self.depth_bn1(x1)
         x3 = self.depth_relu(x2)
         # x = torch.cat((x, low_level_feat), dim=1)
-        x4 = F.interpolate(x3, size=(256, 512), mode="bilinear", align_corners=True)
+        x4 = F.interpolate(x3, size=(128, 256), mode="bilinear", align_corners=True)
         x5 = self.depth_last_conv(x4)
         depth_pred = self.depth_softplus(x5)
 
@@ -360,7 +372,7 @@ class MutliDecoder(nn.Module):
         x = self.seg_bn1(x)
         x = self.seg_relu(x)
         # x = torch.cat((x, low_level_feat), dim=1)
-        x = F.interpolate(x, size=(256, 512), mode="bilinear", align_corners=True)
+        x = F.interpolate(x, size=(128, 256), mode="bilinear", align_corners=True)
         seg_pred = self.seg_last_conv(x)
 
         return depth_pred, seg_pred

@@ -123,7 +123,7 @@ class temporal_loader(data.Dataset):
         :param img_size:
         :param augmentations
         """
-        self.path_num = path_num
+        # self.path_num = path_num
         self.interval = interval
         # self.K = K
         self.root = root

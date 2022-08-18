@@ -62,52 +62,9 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
         # torch.Size([8, 3, 256, 512])
         gt_depth = depth.to(device)
 
-        if task == 'segmentation':
-            task_pred = model(inputs)
-            loss = criterion(task_pred, gt_semantic_labels.squeeze().long())
-            loss.backward()
-            model_opt.step()
-
-            # store loss
-            bs = inputs.size(0)
-            loss = loss.item()
-            loss_running.update(loss, bs)
-
-            # compute the segmentation metrics
-            miou_score = compute_miou(task_pred, gt_semantic_labels).item()
-            miou_running.update(miou_score)
-            task_pred = torch.argmax(task_pred, dim=1)
-            corrects = torch.sum(task_pred == gt_semantic_labels.data)
-            void = 0
-            nvoid = int((gt_semantic_labels == void).sum())
-            res = 256 * 128
-            acc = corrects.cpu().double() / (bs * res - nvoid)
-            acc_running.update(acc, bs)
-            # conf_mat.update(task_pred.argmax(1).flatten(), gt_semantic_labels.flatten())
-            # avg_cost[1:3] = np.array(conf_mat.get_metrics())
-
-        if task == 'depth':
-            task_pred = model(inputs)
-            print(task_pred.shape)
-            break
-            loss = criterion(task_pred, gt_depth)
-            loss.backward()
-            model_opt.step()
-
-            # store loss
-            bs = inputs.size(0)
-            loss = loss.item()
-            loss_running.update(loss, bs)
-
-            # compute the depth metrics
-            abs_err, rel_err = depth_error(task_pred, gt_depth)
-            abs_error_running.update(abs_err)
-            rel_error_running.update(rel_err)
-
-        if task == 'depth_segmentation':
+        # outputs a single task prediction
+        if task == 'segmentation_depth':
             depth_pred, seg_pred = model(inputs)
-            print(depth_pred.shape)
-            break
             seg_loss = criterion[1](seg_pred, gt_semantic_labels.squeeze().long())
             depth_loss = criterion[0](depth_pred, gt_depth)
 
@@ -122,24 +79,63 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             bs = inputs.size(0)
             total_loss = total_loss.item()
             loss_running.update(total_loss, bs)
-
-            # get segmentation metric
             miou_score = compute_miou(seg_pred, gt_semantic_labels).item()
             miou_running.update(miou_score)
+            # get segmentation metric
             seg_pred = torch.argmax(seg_pred, dim=1)
             corrects = torch.sum(seg_pred == gt_semantic_labels.data)
             void = 0
             nvoid = int((gt_semantic_labels == void).sum())
             res = 256 * 128
-            acc = corrects.double() / (bs * res - nvoid)
+            acc = corrects.double() / (bs * res - nvoid)  # correct/(batch_size*resolution-voids)
             acc_running.update(acc, bs)
-
             # get depth metric
             abs_err, rel_err = depth_error(depth_pred, gt_depth)
             abs_error_running.update(abs_err)
             rel_error_running.update(rel_err)
 
-        # output batch info
+        if task == 'segmentation':
+            task_pred = model(inputs)
+            loss = criterion(task_pred, gt_semantic_labels.squeeze().long())
+            # backward pass
+            loss.backward()
+            model_opt.step()
+
+            bs = inputs.size(0)  # current batch size
+            loss = loss.item()
+            loss_running.update(loss, bs)
+            miou_score = compute_miou(task_pred, gt_semantic_labels).item()
+            miou_running.update(miou_score)
+            task_pred = torch.argmax(task_pred, dim=1)
+            corrects = torch.sum(task_pred == gt_semantic_labels.data)
+            void = 0
+            nvoid = int((gt_semantic_labels == void).sum())
+            res = 256 * 128
+            acc = corrects.cpu().double() / (bs * res - nvoid)  # correct/(batch_size*resolution-voids)
+            acc_running.update(acc, bs)
+            # accumulate label prediction for every pixel in training images
+            # conf_mat.update(task_pred.argmax(1).flatten(), gt_semantic_labels.flatten())
+            # cost[0] = loss.item()
+            # print(len(np.array(conf_mat.get_metrics())))
+            # avg_cost[1:3] = np.array(conf_mat.get_metrics())
+
+        if task == 'depth':
+            task_pred = model(inputs)
+            # print(task_pred.shape)
+            # print(gt_depth.shape)
+            loss = criterion(task_pred, gt_depth)
+            # backward pass
+            loss.backward()
+            model_opt.step()
+            bs = inputs.size(0)  # current batch size
+            loss = loss.item()
+            loss_running.update(loss, bs)
+            abs_err, rel_err = depth_error(task_pred, gt_depth)
+            abs_error_running.update(abs_err)
+            rel_error_running.update(rel_err)
+        # if task == 'normal':
+
+        # output training info
         progress.display(batch_idx)
         if batch_idx % 25 == 0:
             if task == 'segmentation':
@@ -154,8 +150,13 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
         batch_time.update(time.time() - end)
         end = time.time()
 
+        # epoch_loss_model += loss.item()
+        # avg_cost[:6] += cost[:6] / len(train_loader)
     # reduce the learning rate
     scheduler.step(loss_running.avg)
+    # returns the average loss per decoder and the loss of the encoder per epoch
+    # epoch_train_loss = epoch_loss_model / len(train_loader)
+    # return epoch_train_loss, cost, avg_cost
     if task == 'depth':
         return loss_running.avg, abs_error_running.avg, rel_error_running.avg
     if task == 'segmentation':
@@ -175,7 +176,7 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
     rel_error_running = AverageMeter('Relative error', ':.3f')
     miou_running = AverageMeter('Miou', ':.3f')
     if task == 'segmentation':
-        # iou = iouCalc(classLabels, validClasses, voidClass=void)
+        iou = iouCalc(classLabels, validClasses, voidClass=void)
         progress = ProgressMeter(
             len(test_loader),
             [batch_time, data_time, loss_running, acc_running, miou_running],
@@ -188,7 +189,7 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
             prefix="Train, epoch: [{}]".format(epoch))
 
     if task == 'depth_segmentation':
-        # iou = iouCalc(classLabels, validClasses, voidClass=void)
+        iou = iouCalc(classLabels, validClasses, voidClass=void)
         progress = ProgressMeter(
             len(test_loader),
             [batch_time, data_time, loss_running, abs_error_running, rel_error_running, acc_running, miou_running],
@@ -204,31 +205,48 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
             gt_semantic_labels = labels.long().to(device)
             gt_depth = depth.to(device)
             task_pred = single_task_model(inputs)
-
             if task == 'segmentation':
                 loss = criterion(task_pred, gt_semantic_labels.squeeze().long())
                 bs = inputs.size(0)
                 loss = loss.item()
                 loss_running.update(loss, bs)
-
                 miou_score = compute_miou(task_pred, gt_semantic_labels).item()
                 miou_running.update(miou_score)
+                # conf_mat.update(train_pred.argmax(1).flatten(), train_label.flatten())
                 task_pred = torch.argmax(task_pred, dim=1)
                 corrects = torch.sum(task_pred == gt_semantic_labels.data)
                 void = 0
                 nvoid = int((gt_semantic_labels == void).sum())
                 res = 256 * 128
-                acc = corrects.cpu().double() / (bs * res - nvoid)
+                acc = corrects.cpu().double() / (bs * res - nvoid)  # correct/(batch_size*resolution-voids)
                 acc_running.update(acc, bs)
+                # print(task_pred.squeeze().shape)
+                # print(gt_semantic_labels.squeeze().shape)
+                # torch.set_printoptions(profile="full")
+                # t = task_pred.squeeze()
+                # print(t[0, :, :])
+                # b = gt_semantic_labels.squeeze()
+                # print(b[0,:,:])
+                # torch.set_printoptions(profile="default")
                 # Calculate IoU scores of current batch
                 # iou.evaluateBatch(task_pred, gt_semantic_labels)
+                # iou.evaluateBatch(decode_pred(task_pred.squeeze(), validClasses), gt_semantic_labels.squeeze())
 
                 # Save visualizations of first batch
                 if batch_idx == 0 and epoch == 199 and maskColors is not None:
                     imgs = inputs.data.cpu().numpy()
                     for i in range(inputs.size(0)):
                         filename = filepath[i]
-                        save_visualization_segmentation(i, imgs, task_pred, gt_semantic_labels, filename, folder)
+                        # Only save inputs and labels once
+                        img_input = np.transpose(imgs[i], (1, 2, 0))
+                        gt_id_format = gt_semantic_labels[i, :, :].squeeze()
+                        gt_color_format = vislbl(gt_id_format, maskColors)
+                        cv2.imwrite(folder + '/images/{}_epoch_{}_img.png'.format(filename, epoch), img_input)
+                        cv2.imwrite(folder + '/images/{}_epoch_{}_gt.png'.format(filename, epoch), gt_color_format)
+                        # Save predictions
+                        task_pred_id_format = task_pred[i, :, :]
+                        pred_color_format = vislbl(task_pred_id_format, maskColors)
+                        cv2.imwrite(folder + '/images/{}_epoch_{}_pred.png'.format(filename, epoch), pred_color_format)
 
             if task == 'depth':
                 # print(task_pred.shape)
@@ -242,19 +260,48 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                 rel_error_running.update(rel_err)
 
                 # Save visualizations of first batch
-                if batch_idx == 0 and epoch == 199:
+                if batch_idx == 0 and epoch == 0:
                     imgs = inputs.data.cpu().numpy()
                     gt_depth_ = gt_depth.data.cpu().numpy()
                     pred_depth_ = task_pred.data.cpu().numpy()
                     for i in range(inputs.size(0)):
                         filename = filepath[i]
-                        save_visualization_depth(i, imgs, pred_depth_, gt_depth_, filename, folder)
+                        img_input = np.transpose(imgs[i], (1, 2, 0))
+                        pred_target = pred_depth_[i][0] / 256
+                        img_gt = gt_depth_[i][0] / 256
+                        # stereo = cv2.StereoBM_create(numDisparities=16, blockSize=15)
+                        # disparity = stereo.compute(img_input, pred_target)
+                        # plt.imshow(disparity)
+                        # plt.show()
+                        # plt.savefig(folder + '/images/{}.png'.format(filename + '_image_' + str(i)))
+                        # plt.close()
+                        # Only save inputs and labels once
+                        # Saving colormapped depth image
+                        # vmax = np.percentile(pred_target, 95)
+                        fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
+                        plt.figure(figsize=(10, 10))
+                        # y, x = np.where(img_gt > 0)
+                        # d = img_gt[img_gt != 0]
+                        # xyd = np.stack((x, y, d)).T
+                        # gt = lin_interp(img_gt.shape, xyd)
+                        axs1.imshow(img_input)
+                        # plt.title("Input", fontsize=22)
+                        # plt.axis('off')
+                        # plt.subplot(212)
+                        axs2.imshow(pred_target)
+                        plt.title("Disparity prediction", fontsize=22)
+                        axs2.axis('off')
+                        axs3.imshow(img_gt)
+                        plt.title("Disparity actual", fontsize=22)
+                        fig.savefig(folder + '/images/{}.png'.format(filename+'_image_'+str(i)))
+                        plt.close(fig)
 
             if task == 'depth_segmentation':
+                # print(task_pred.shape)
+                # print(gt_depth.shape)
                 depth_pred, seg_pred = single_task_model(inputs)
                 seg_loss = criterion[1](seg_pred, gt_semantic_labels.squeeze().long())
                 depth_loss = criterion[0](depth_pred, gt_depth)
-
                 # Equal Weighted losses
                 depth_weight = 0.5
                 seg_weight = 0.5
@@ -279,35 +326,61 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                 acc_running.update(acc, bs)
 
                 # Save visualizations of first batch
-                if batch_idx == 0 and epoch == 199:
+                if batch_idx == 0 and epoch == 0:
                     imgs = inputs.data.cpu().numpy()
                     gt_depth_ = gt_depth.data.cpu().numpy()
                     pred_depth_ = depth_pred.data.cpu().numpy()
                     for i in range(inputs.size(0)):
                         filename = filepath[i]
-                        save_visualization_depth(i, imgs, pred_depth_, gt_depth_, filename, folder)
-                        save_visualization_segmentation(i, imgs, seg_pred, gt_semantic_labels, filename, folder)
+                        img_input = np.transpose(imgs[i], (1, 2, 0))
+                        pred_target = pred_depth_[i][0] / 256
+                        img_gt = gt_depth_[i][0] / 256
+                        fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
+                        plt.figure(figsize=(10, 10))
+                        axs1.imshow(img_input)
+                        axs2.imshow(pred_target)
+                        plt.title("Disparity prediction", fontsize=22)
+                        axs2.axis('off')
+                        axs3.imshow(img_gt)
+                        plt.title("Disparity actual", fontsize=22)
+                        fig.savefig(folder + '/images/{}.png'.format(filename+'_image_'+str(i)))
+                        plt.close(fig)
 
+                        # Only save inputs and labels once
+                        # img_input = np.transpose(imgs[i], (1, 2, 0))
+                        gt_id_format = gt_semantic_labels[i, :, :].squeeze()
+                        gt_color_format = vislbl(gt_id_format, maskColors)
+                        cv2.imwrite(folder + '/images/{}_epoch_{}_img.png'.format(filename, epoch), img_input)
+                        cv2.imwrite(folder + '/images/{}_epoch_{}_gt.png'.format(filename, epoch), gt_color_format)
+                        # Save predictions
+                        task_pred_id_format = seg_pred[i, :, :]
+                        pred_color_format = vislbl(task_pred_id_format, maskColors)
+                        cv2.imwrite(folder + '/images/{}_epoch_{}_pred.png'.format(filename, epoch), pred_color_format)
 
+            # compute mIoU and acc
+            # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
         # print progress info
         progress.display(epoch)
-
+    # # compute mIoU and acc
+    # avg_cost[epoch, 1:3] = conf_mat.get_metrics()
+    # scheduler_slow.step()
+    # scheduler_fast.step()
+    # epoch_test_loss = epoch_loss_model / len(test_loader)
+    # return epoch_test_loss, cost, avg_cost
     if task == 'depth':
         print('Abs. Error      : {:5.3f}'.format(abs_error_running.avg))
         print('Rel Error      : {:5.3f}'.format(rel_error_running.avg))
         print('---------------------')
         return rel_error_running.avg, abs_error_running.avg, loss_running.avg
-
     if task == 'segmentation':
         # miou = iou.outputScores()
         print('Accuracy      : {:5.3f}'.format(acc_running.avg))
         print('Miou      : {:5.3f}'.format(miou_running.avg))
         print('---------------------')
         return acc_running.avg, loss_running.avg, miou_running.avg
-    # output for multi task learning
     print('Abs. Error      : {:5.3f}'.format(abs_error_running.avg))
     print('Rel Error      : {:5.3f}'.format(rel_error_running.avg))
     print('Accuracy      : {:5.3f}'.format(acc_running.avg))
@@ -354,25 +427,6 @@ def save_visualization_depth(index, imgs, pred_depth_, gt_depth_, filename, fold
     plt.close(fig)
 
 
-# stereo = cv2.StereoBM_create(numDisparities=16, blockSize=15)
-# disparity = stereo.compute(img_input, pred_target)
-# plt.imshow(disparity)
-# plt.show()
-# plt.savefig(folder + '/images/{}.png'.format(filename + '_image_' + str(i)))
-# plt.close()
-# Only save inputs and labels once
-# Saving colormapped depth image
-# vmax = np.percentile(pred_target, 95)
-# fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
-# plt.figure(figsize=(10, 10))
-# y, x = np.where(img_gt > 0)
-# d = img_gt[img_gt != 0]
-# xyd = np.stack((x, y, d)).T
-# gt = lin_interp(img_gt.shape, xyd)
-# axs1.imshow(img_input)
-# plt.title("Input", fontsize=22)
-# plt.axis('off')
-# plt.subplot(212)
 
 
 # def decode_pred(input, validClasses):
