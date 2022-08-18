@@ -1,7 +1,7 @@
 import logging
 import torch
 import functools
-from loss.loss import model_fit, DiceLoss, DiceBCELoss
+from loss.loss import model_fit, DiceLoss, DiceBCELoss, InverseDepthL1Loss
 
 # from ptsemseg.loss.loss import (
 #     SegmentationLosses,

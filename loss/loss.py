@@ -41,6 +41,18 @@ class OhemCELoss2D(nn.CrossEntropyLoss):
             loss = loss[:self.n_min]
         return torch.mean(loss)
 
+# Depth inverse depth l1 loss
+class InverseDepthL1Loss(nn.Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, x_pred, x_output):
+        device = x_pred.device
+        # binary mark to mask out undefined pixel space
+        binary_mask = (torch.sum(x_output, dim=1) != 0).float().unsqueeze(1).to(device)
+        # depth loss: l1 norm
+        loss = torch.sum(torch.abs(x_pred - x_output) * binary_mask) / torch.nonzero(binary_mask,
+                                                                                     as_tuple=False).size(0)
+        return loss
 
 # Mila  class for model training
 class AdvLoss(nn.Module):
@@ -112,3 +124,27 @@ def model_fit(x_pred, x_output, task_type):
         loss = torch.sum(torch.abs(x_pred - x_output) * binary_mask) / torch.nonzero(binary_mask, as_tuple=False).size(
             0)
     return loss
+
+
+class Discriminator(nn.Module):
+    # self.model = nn.Sequential(series of convs) - outputs a binary probability of being from Slow or Fast
+    # self.act = nn.Sigmoid()
+
+    def forward(self, x_slow, x_fast):
+        return self.act(self.model(x_slow)), self.act(self.model(x_fast))
+
+
+def loss_function(y_pred, y_gt, x_slow_all, x_fast_all, D=Discriminator()):
+    # prediction loss
+    loss_1 = nn.CrossEntropyLoss()(y_pred, y_gt)
+
+    # adversarial loss
+    loss_l1 = nn.L1Loss()(x_slow_all, x_fast_all)
+    slow_prob = D(x_slow_all)
+    fast_prob = D(x_fast_all)
+    loss_adv = nn.BCELoss()
+    labels = torch.tensor(torch.ones_like(slow_prob), torch.zeros_like(fast_prob))
+    loss_adv_c = loss_adv([slow_prob, fast_prob], labels)
+    loss_from_paper = alpha * loss_l1 - beta * loss_adv_c
+
+    return loss_1, loss_from_paper
