@@ -1,1 +1,2 @@
-from .attention import LocalContextAttentionBlock
+from .attention import LocalContextAttentionBlock, GlobalContextAttentionBlock
+from .utils_heads import ConvBNReLU

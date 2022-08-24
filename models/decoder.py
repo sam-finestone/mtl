@@ -5,7 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 # from resnet_encoder import Block
 from models.attention.attention import LocalContextAttentionBlock
-from sync_batchnorm.batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback, SynchronizedBatchNorm2d
+from sync_batchnorm.batchnorm import SynchronizedBatchNorm1d, \
+    DataParallelWithCallback, SynchronizedBatchNorm2d, SynchronizedBatchNorm3d
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -347,3 +348,46 @@ class MultiDecoder(nn.Module):
                 m.bias.data.zero_()
 
 
+class SegDecoderTemporal(nn.Module):
+    def __init__(self, input_t_dim, num_classes, drop_out, BatchNorm):
+        super(SegDecoderTemporal, self).__init__()
+        # if backbone == "resnet" or backbone == "drn":
+        #     low_level_inplanes = 256
+        self.input_t = input_t_dim
+        self.num_classes = num_classes
+        mid_input_dim = 6
+        self.conv1 = nn.Conv3d(input_t_dim, mid_input_dim, 1, bias=False)
+        self.bn1 = BatchNorm(mid_input_dim)
+        self.relu = nn.ReLU()
+        self.last_conv = nn.Sequential(
+            nn.Conv3d(mid_input_dim, mid_input_dim, kernel_size=(3, 3, 3), stride=1, padding=1, bias=False),
+            BatchNorm(mid_input_dim),
+            nn.ReLU(),
+            nn.Dropout(drop_out),
+            nn.Conv3d(mid_input_dim, mid_input_dim, kernel_size=(3, 3, 3), stride=1, padding=1, bias=False),
+            BatchNorm(mid_input_dim),
+            nn.ReLU(),
+            nn.Dropout(drop_out),
+            nn.Conv3d(mid_input_dim, 1, kernel_size=(1, 1, 1), stride=1),
+        )
+        self._init_weight()
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        # x = torch.cat((x, low_level_feat), dim=1)
+        x = F.interpolate(x, size=(self.num_classes, 128, 256), mode="trilinear", align_corners=True)
+        x = self.last_conv(x)
+        return x
+
+    def _init_weight(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                torch.nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, SynchronizedBatchNorm3d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+            elif isinstance(m, nn.BatchNorm3d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()

@@ -396,17 +396,17 @@ def save_visualization_depth(index, imgs, pred_depth_, gt_depth_, filename, load
     img_input = (denorm(imgs[index]) * 255).transpose(1, 2, 0).astype(np.uint8)
     # pred_target = pred_depth_[index][0] / 255
     # pred_target = loader.dataset.unmap_disparity(pred_depth_[index][0])
-    pred_target = pred_depth_[index][0]  # [128, 256]
+    # pred_target = pred_depth_[index][0]  # [128, 256]
+    pred_target = loader.dataset.map_to_rgb(pred_depth_[index][0])
     # img_gt = gt_depth_[index][0] / 255
-    img_gt = gt_depth_[index][0]  # [128, 256]
-    print(pred_target.shape)
-    print(img_gt.shape)
+    img_gt = loader.dataset.map_to_rgb(gt_depth_[index][0])
+    # img_gt = gt_depth_[index][0]  # [128, 256]
     # img_gt = loader.dataset.map_to_rgb(gt_depth_[index][0])
     # img_gt = loader.dataset.unmap_disparity(gt_depth_[index][0])
-    # print('predcited image max value: ' + str(pred_target.max()))
-    # print('predcited image min value: ' + str(pred_target.min()))
-    # print('actual image max value: ' + str(img_gt.max()))
-    # print('actual image min value: ' + str(img_gt.min()))
+    print('predcited image max value: ' + str(pred_target.max()))
+    print('predcited image min value: ' + str(pred_target.min()))
+    print('actual image max value: ' + str(img_gt.max()))
+    print('actual image min value: ' + str(img_gt.min()))
 
     fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
     plt.figure(figsize=(10, 10))

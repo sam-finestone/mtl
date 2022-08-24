@@ -246,7 +246,8 @@ class staticLoader(data.Dataset):
 
     @classmethod
     def map_to_rgb(cls, disparity):
-        disparity = (244 - (-0)) *(disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+        # disparity = (244 - (-0)) *(disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+        disparity = np.round((disparity + 1) * 255 / 2) * 127.5
         return disparity
 
     def __len__(self):

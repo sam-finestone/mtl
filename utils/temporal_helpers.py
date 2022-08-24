@@ -70,11 +70,7 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
         gt_depth = depth.to(device)
         # print(gt_depth.shape)
         if task == 'segmentation':
-            # inputs = Variable(inputs.to(device))
-            # gt_semantic_labels = Variable(labels.to(device))
             task_pred = model(inputs)
-            print('gt_semantic_labels.shape: ' + str(gt_semantic_labels.shape))
-            print('task_pred.shape: ' + str(task_pred.shape))
             loss = criterion(task_pred, gt_semantic_labels)
             loss.backward()
             model_opt.step()
