@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from tensorboardX import SummaryWriter
 from models.deeplabv3_encoder import DeepLabv3
-from sync_batchnorm import SynchronizedBatchNorm1d
+from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback, SynchronizedBatchNorm2d
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -170,22 +170,23 @@ class MultiTaskModel1(nn.Module):
         self.multi_task = mulit_task
         self.fast_se_feature = torch.zeros((8, 256, 8, 16))
 
+
     def forward(self, input):
         # [b, t, c, h, w]
         # Get the keyframes and non-keyframes for slow/fast setting
         # keyframes, non_keyframes, list_kf_indicies = self.get_keyframes(input)
-        # print('input shape: ' +str(input.shape)) - torch.Size([4, 5, 3, 128, 256])
-        keyframes, non_keyframes, kf_mask, nk_mask = self.keyframes(input)
+        print('input shape: ' +str(input.shape)) #- torch.Size([4, 5, 3, 128, 256])
+        # keyframes, non_keyframes, kf_mask, nk_mask = self.keyframes(input)
         keyframes, non_keyframes, list_kf_indicies, list_non_kf_indicies = self.get_keyframes(input)
-        # print('keyframe inputs using masking technique, [image, 0, image, 0, image(annotated)]: ' + str(keyframes.shape))
-        # print('non-keyframe inputs using masking technique, [0, image, 0, image, 0]: ' + str(non_keyframes.shape))
+        print('keyframe inputs using masking technique, [image, 0, image, 0, image(annotated)]: ' + str(keyframes.shape))
+        print('non-keyframe inputs using masking technique, [0, image, 0, image, 0]: ' + str(non_keyframes.shape))
         # change the dimensions of the input tensor for the deeplabv3 encoder and obtain encoder features
         enc_slow_ftrs, batch_size, t_dim_slow = self.run_encoder(keyframes, self.encoder_slow)
         enc_fast_ftrs, _, t_dim_fast = self.run_encoder(non_keyframes, self.encoder_fast)
         output_slow = self.reshape_output(enc_slow_ftrs, batch_size, t_dim_slow)
         output_fast = self.reshape_output(enc_fast_ftrs, batch_size, t_dim_fast)
-        # print('Reshaped output from slow (b,t,c,w,h):' + str(output_slow.shape))
-        # print('Reshaped output from fast (b,t,c,w,h):' + str(output_fast.shape))
+        print('Reshaped output from slow (b,t,c,w,h):' + str(output_slow.shape))
+        print('Reshaped output from fast (b,t,c,w,h):' + str(output_fast.shape))
         # print('enc_slow_ftrs: ' + str(output_slow.shape))
         # print('enc_fast_ftrs[:,-1]: ' + str(torch.unsqueeze(output_fast[:, -1], dim=1).shape))
         # Different ways of propagating temporal features
@@ -210,26 +211,35 @@ class MultiTaskModel1(nn.Module):
 
         # want to stake the predicted frames back in order of the T
         # segmentation_pred = self.stack_predictions(output_seg_slow, output_seg_fast, list_kf_indicies)
+        print('task_predictions at the end of mtl_model:' + str(task_predictions.shape))
         return task_predictions
 
     def concatenate(self, output_slow, output_fast, mulit_task=False):
         frame_batch_dim = output_slow.shape[0]
+        print(frame_batch_dim)
         frames_t_dim = output_slow.shape[1]
         frame_2d_batch = frame_batch_dim * frames_t_dim
         kf_encoded_frames = torch.reshape(output_slow, (frame_2d_batch, output_slow.shape[2], output_slow.shape[3],
-                                                        output_slow.shape[4]))
-        fast_frame = output_fast[:, -1].tile((2, 1, 1, 1))  # is there a better way of doing this?
-        # print(kf_encoded_frames.shape) - torch.Size([8, 256, 8, 16])
-        # print(fast_frame.shape) - torch.Size([8, 256, 8, 16])
+                                                        output_slow.shape[4])).to('cuda:0')
+
+        fast_frame = output_fast[:, -1].tile((2, 1, 1, 1)).to('cuda:0')  # is there a better way of doing this?
+        # print(kf_encoded_frames.shape)# - torch.Size([8, 256, 8, 16])
+        # print(fast_frame.shape) #- torch.Size([8, 256, 8, 16])
         # output_fast_unsqueezed = torch.unsqueeze(output_fast[:, -1], dim=1)
-        x_fusion = torch.cat([kf_encoded_frames, fast_frame], dim=1)
-        # x_fusion.shape - torch.Size([8, 512, 8, 16])
+        print('kf_encoded_frames: ' + str(kf_encoded_frames.get_device()))
+        print('fast_frame: ' + str(fast_frame.get_device()))
+        x_fusion = torch.cat([kf_encoded_frames, fast_frame], dim=1).to('cuda:0')
+        print(x_fusion.shape)
+        # x_fusion.shape - torch.Size([4, 512, 8, 16])
         # run a decoder for each task
         # task_combin_pred = []
+        print('x_fusion: ' + str(x_fusion.get_device()))
         if not mulit_task:
             #  depth decoder or segmentation decoder
+
             task_decoder = self.list_decoders[-1]
             task_predictions = task_decoder(x_fusion)
+            print('task_predictions.shape: ' + str(task_predictions.shape))
         else:
             task_predictions = []
             for task_decoder in self.list_decoders:
@@ -241,12 +251,18 @@ class MultiTaskModel1(nn.Module):
 
     def adverserial_concatentation(self, input, mulit_task=False):
         keyframes, non_keyframes, list_kf_indicies, list_non_kf_indicies = self.get_keyframes(input)
+        # print(input.shape) - torch.Size([4, 5, 3, 128, 256])
         x_slow_all, batch_size, t_dim_slow = self.run_encoder(input, self.encoder_slow)
         x_fast_all, _, t_dim_fast = self.run_encoder(input, self.encoder_fast)
-
+        # print(x_fast_all.shape) - torch.Size([10, 256, 8, 16])
+        # print(x_slow_all.shape) - torch.Size([10, 2, 8, 16])
         # apply masks to x_slow_all and x_fast_all and put representations into correct keyframe and frames
         # only take the last frame before segmentation + the first keyframe
-        x_fused = torch.cat([x_slow_all[:, list_kf_indicies], x_fast_all[:, list_non_kf_indicies][-1]])
+        # print(x_slow_all[:, list_kf_indicies].shape)
+        # print(x_fast_all[:, list_non_kf_indicies][-1].shape)
+        fast_last_frame = x_fast_all[:, list_non_kf_indicies][-1].tile((x_slow_all[:, list_kf_indicies].shape[0], 1, 1, 1))
+        x_fused = torch.cat([x_slow_all[:, list_kf_indicies], fast_last_frame], dim=1).to('cuda:0')
+        print(x_fused.shape)
         if not mulit_task:
             task_decoder = self.list_decoders[-1]
             task_predictions = task_decoder(x_fused)
@@ -325,6 +341,62 @@ class MultiTaskModel1(nn.Module):
         writer.add_histogram("weights/MILADecoder/fc1/bias", model.fc1.bias.data, step)
         writer.add_histogram("weights/MILADecoder/fc2/weight", model.fc2.weight.data, step)
         writer.add_histogram("weights/MILADecoder/fc2/bias", model.fc2.bias.data, step)
+
+
+class SimpleNet(nn.Module):
+    ''' SimpleNet is a network that takes in two tensors of features, one from the slow encoded features
+    and the other the fast features frames and outputs a supposedly better performing concatenation of the features'''
+    def __init__(self, input_dim_slow, input_dim_fast, output_dim):
+        super(SimpleNet, self).__init__()
+        # 1 input image channel, 6 output channels, 5x5 square convolution
+        # kernel
+        self.conv_layer = nn.Sequential(
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
+            BatchNorm(256),
+            nn.ReLU(),
+            nn.Dropout(drop_out),
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
+            BatchNorm(256),
+            nn.ReLU(),
+            nn.Dropout(drop_out),
+            nn.Conv2d(256, num_classes, kernel_size=1, stride=1),
+        )
+        self._init_weight()
+
+    def forward(self, output_slow, output_fast):
+        frame_batch_dim = output_slow.shape[0]
+        print(frame_batch_dim)
+        frames_t_dim = output_slow.shape[1]
+        frame_2d_batch = frame_batch_dim * frames_t_dim
+        kf_encoded_frames = torch.reshape(output_slow, (frame_2d_batch, output_slow.shape[2], output_slow.shape[3],
+                                                        output_slow.shape[4]))
+
+        fast_frame = output_fast[:, -1].tile((2, 1, 1, 1))
+        combined = torch.cat((c.view(c.size(0), -1),
+                              f.view(f.size(0), -1)), dim=1)
+        # then pass both through a convolutional network
+
+        x = F.max_pool2d(F.relu(self.conv1(x)), (2, 2))
+        # If the size is a square, you can specify with a single number
+        x = F.max_pool2d(F.relu(self.conv2(x)), 2)
+        x = torch.flatten(x, 1) # flatten all dimensions except the batch dimension
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        # output the concatenated features of
+
+        return x
+
+    def _init_weight(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                torch.nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, SynchronizedBatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
 
 
 if __name__ == "__main__":

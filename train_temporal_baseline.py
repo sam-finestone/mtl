@@ -9,15 +9,18 @@ import logging
 # from torchvision.datasets import Cityscapes
 from loader.cityscapes_loader import cityscapesLoader
 from loader.city_loader import staticLoader
+from loader.temporal_loader import temporalLoader
 # from loader.video_dataset import *
 from utils.sort_dataset import *
 # from loader.nyuv2_dataloader import NYUV2
 from models.decoder import Decoder, SegDecoder, DepthDecoder, MultiDecoder
-from models.mtl_model import MultiTaskModel
+from models.mtl_model import MultiTaskModel1
 from models.static_model import StaticTaskModel
 from models.deeplabv3_encoder import DeepLabv3
 from utils.train_helpers import *
-from utils.static_helpers import static_single_task_trainer, static_test_single_task, save_ckpt
+# from utils.static_helpers import static_single_task_trainer, static_test_single_task, save_ckpt
+from utils.temporal_helpers import static_single_task_trainer, static_test_single_task, save_ckpt
+
 from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback
 from utils.metrics import plot_learning_curves
 from loss.loss import InverseDepthL1Loss, L1LossIgnoredRegion
@@ -31,7 +34,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 parser = argparse.ArgumentParser()
 
 # commandline arguments
-parser = argparse.ArgumentParser(description='Multi-Task Temporal w/ Partial annotation')
+parser = argparse.ArgumentParser(description='Multi-Task Temporal w/ full annotation')
 parser.add_argument('-g', '--gpu', default=[0], nargs='+', type=int, help='index of gpu to use, default 2')
 parser.add_argument('-m', '--multi', default=1, type=int, help='0 for single opt, 1 for multi opt, default 1')
 parser.add_argument('--model_save_path', type=str, default='.', help='Path to the saved models')
@@ -45,17 +48,15 @@ parser.add_argument('--dataset_std', metavar='[0.229, 0.224, 0.225]',
                     help='std for normalization')
 
 # uncomment for segmentation run
-# parser.add_argument("--config", default='configs/medtronic_cluster/static_cityscape_config_seg',
-#                     nargs="?", type=str, help="Configuration file to use")
-
-# uncomment for depth run
-parser.add_argument("--config", default='configs/medtronic_cluster/static_cityscape_config_depth',
+parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
                     nargs="?", type=str, help="Configuration file to use")
 
-# uncomment for both tasks
-# parser.add_argument("--config", default='configs/medtronic_cluster/static_cityscape_config_both',
+# uncomment for depth run
+# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_depth',
 #                     nargs="?", type=str, help="Configuration file to use")
-
+# uncomment for both tasks
+# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
+#                     nargs="?", type=str, help="Configuration file to use")
 
 args = parser.parse_args()
 with open(args.config) as fp:
@@ -78,30 +79,28 @@ BACKBONE = cfg["model"]["backbone"]["encoder"]
 DATASET_PATH = cfg["data"]["path"]
 CLASS_TASKS = cfg["model"]["task_classes"]
 frames_per_segment = cfg["model"]["frames_per_segment"]
+window_size = cfg["model"]["window_size"]
+k = cfg["model"]["k"]
 path_n = cfg["model"]["path_num"]
 data_path = cfg["data"]["path"]
 input_dim_decoder = 256
 TASK = cfg["model"]["tasks"]
 
 # Initialize mlflow
-NAME_EXPERIMENT = 'experiment_static_' + TASK
-# mlflow.set_tracking_uri("http://10.167.61.230:5000")
-# mlflow.set_tracking_uri("https://mlflow-dev.touchsurgery.com")
-# mlflow.set_tracking_uri("https://mlflow-dev-ml-rs-staging.touchsurgery.com")
-# mlflow.set_tracking_uri('http://mlflow-server:5000')
+NAME_EXPERIMENT = 'experiment_temporal_' + TASK
 mlflow.set_experiment(experiment_name=NAME_EXPERIMENT)
 
 # train_augmentations = torch.nn.Sequential(transforms.Resize(size=(128, 256)),
 #                                           # transforms.RandomCrop(size=(256, 512)),
-#                                           transforms.RandomHorizontalFlip(p=0.5),
+#                                           transforms.RandomHorizontalFlip(p=0.5)
 #                                           # transforms.Normalize(mean=(123.675, 116.28, 103.53),
 #                                           #                      std=(58.395, 57.12, 57.375)),
 #                                           # transforms.Pad(padding=(256, 512))
 #                                           )
-
+#
 # val_augmentations = torch.nn.Sequential(transforms.Resize(size=(128, 256)),
 #                                         # transforms.RandomCrop(size=(256, 512)),
-#                                         transforms.RandomHorizontalFlip(p=0.5),
+#                                         transforms.RandomHorizontalFlip(p=0.5)
 #                                         # transforms.Normalize(mean=(123.675, 116.28, 103.53),
 #                                         #                      std=(58.395, 57.12, 57.375)),
 #                                         # transforms.Pad(padding=(256, 512))
@@ -124,29 +123,28 @@ val_transform = et.ExtCompose([
     ])
 
 # Load the dataloaders
-print('Preprocessing Static ' + cfg["data"]["dataset"])
-train_set = staticLoader(DATASET_PATH,
-                         split=cfg["data"]["train_split"],
-                         transform=train_transform,
-                         test_mode=False,
+print('Preprocessing Temporal ' + cfg["data"]["dataset"])
+train_set = temporalLoader(DATASET_PATH,
+                           split=cfg["data"]["train_split"],
+                           transform=train_transform,
+                           test_mode=False,
+                           model_name=None,
+                           interval=window_size)
+val_set = temporalLoader(DATASET_PATH,
+                         split=cfg["data"]["val_split"],
+                         transform=val_transform,
+                         test_mode=True,
                          model_name=None,
-                         path_num=path_n)
-val_set = staticLoader(DATASET_PATH,
-                       split=cfg["data"]["val_split"],
-                       transform=val_transform,
-                       test_mode=True,
-                       model_name=None,
-                       path_num=path_n)
-test_set = staticLoader(DATASET_PATH,
-                        split=cfg["data"]["test_split"],
-                        transform=val_transform,
-                        test_mode=True,
-                        model_name=None,
-                        path_num=path_n)
+                         interval=window_size)
+test_set = temporalLoader(DATASET_PATH,
+                         split=cfg["data"]["test_split"],
+                         transform=val_transform,
+                         test_mode=True,
+                         model_name=None,
+                         interval=window_size)
 
-print(train_set.num_classes)
 classLabels = val_set.class_names
-# print(len(classLabels))
+print(len(classLabels))
 validClasses = val_set.valid_classes
 # mask_colors = val_set.colors
 void_class = val_set.void_classes
@@ -156,6 +154,7 @@ train_dataloader = torch.utils.data.DataLoader(dataset=train_set,
                                                shuffle=False,
                                                num_workers=cfg["training"]["n_workers"],
                                                drop_last=True)
+
 val_dataloader = torch.utils.data.DataLoader(dataset=val_set,
                                              batch_size=cfg["validating"]["batch_size"],
                                              shuffle=False,
@@ -167,10 +166,14 @@ test_dataloader = torch.utils.data.DataLoader(dataset=test_set,
                                               shuffle=False,
                                               num_workers=cfg["validating"]["n_workers"],
                                               drop_last=True)
-print('Initialising Model')
+print('Initialising Temporal Model')
 # Initializing encoder
-deeplabv3_backbone = cfg["model"]["backbone"]["encoder"]["resnet_version"]
-enc = DeepLabv3(deeplabv3_backbone).to(device)
+deeplabv3_backbone_slow = cfg["model"]["backbone"]["encoder"]["resnet_slow"]
+deeplabv3_backbone_fast = cfg["model"]["backbone"]["encoder"]["resnet_fast"]
+
+encoder_slow = DeepLabv3(deeplabv3_backbone_slow).to(device)
+encoder_fast = DeepLabv3(deeplabv3_backbone_fast).to(device)
+
 # enc_optimizer = optim.SGD(enc.parameters(),
 #                           lr=cfg["training"]["optimizer"]["lr0"],
 #                           momentum=cfg["training"]["optimizer"]["momentum"],
@@ -178,59 +181,37 @@ enc = DeepLabv3(deeplabv3_backbone).to(device)
 
 # initialise decoders (one for each task)
 drop_out = cfg["model"]["dropout"]
+version = cfg["model"]["version"]
+# version = 'advers'
 if TASK == 'segmentation':
-    dec = SegDecoder(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm1d).to(device)
+    if version == 'basic':
+        input_dim_decoder = 512
+    if version == 'advers':
+        input_dim_decoder = 5
+    dec = SegDecoder(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm1d).to('cuda:0')
 elif TASK == 'depth':
     dec = DepthDecoder(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm1d).to(device)
 elif TASK == 'depth_segmentation':
     dec = MultiDecoder(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm1d).to(device)
 
 # initialise multi (or single) - task model
-model = StaticTaskModel(enc, dec, TASK).to(device)
-# model = getattr(deeplab, 'resnet101')(
-#         pretrained=False,
-#         num_classes=19,
-#         num_groups=None,
-#         weight_std=False,
-#         beta=False)
-# model = Deeplab_v3plus(19).to(device)
-# Push model to GPU
+model = MultiTaskModel1(encoder_slow, encoder_fast, [dec], k, version=version, mulit_task=False).to(device)
 # model = model.to(device)
-
+# Push model to GPU
 if torch.cuda.is_available():
     model = torch.nn.DataParallel(model).to(device)
     print('Model pushed to {} GPU(s), type {}.'.format(torch.cuda.device_count(), torch.cuda.get_device_name(0)))
 
-# for m in model.modules():
-#     if isinstance(m, nn.BatchNorm2d):
-#       m.eval()
-#       m.weight.requires_grad = False
-#       m.bias.requires_grad = False
-# backbone_params = (
-#     list(model.module.conv1.parameters()) +
-#     list(model.module.bn1.parameters()) +
-#     list(model.module.layer1.parameters()) +
-#     list(model.module.layer2.parameters()) +
-#     list(model.module.layer3.parameters()) +
-#     list(model.module.layer4.parameters()))
-# last_params = list(model.module.aspp.parameters())
-# model_opt = optim.SGD([
-#   {'params': filter(lambda p: p.requires_grad, backbone_params)},
-#   {'params': filter(lambda p: p.requires_grad, last_params)}],
-#   lr=0.00025, momentum=0.9, weight_decay=0.0001)
-model_opt = optim.Adam(model.parameters(), lr=0.01)
-# scheduler = get_scheduler(model_opt, cfg['training']['lr_schedule'])
-# model_opt = torch.optim.SGD(params=model.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-4)
-# model_opt = optim.SGD(model.parameters(), lr=cfg['training']["optimizer"]["lr"], momentum=0.9, weight_decay=0.0001)
+
+model_opt = optim.Adam(model.parameters(), lr=cfg["training"]["optimizer"]["lr0"])
 scheduler = optim.lr_scheduler.StepLR(model_opt,
-                                      step_size=10000,
-                                      gamma=0.1)
-# model_opt = optim.SGD(model.parameters(), lr=0.1, weight_decay=1e-4, momentum=0.9)
-#scheduler = optim.lr_scheduler.CosineAnnealingLR(model_opt, EPOCHS)
+                                      step_size=cfg["training"]["scheduler"]["step"],
+                                      gamma=cfg["training"]["scheduler"]["gamma"])
+
 # directory name to save the models
-MODEL_SAVE_PATH = os.path.join(args.model_save_path, 'Model', 'Checkpoints', 'Static', TASK)
-LOG_FILE = os.path.join(args.model_save_path, 'Logs', 'Static', TASK)
-SAMPLES_PATH = os.path.join(args.model_save_path, 'Model', 'Sample', 'Static', TASK)
+MODEL_SAVE_PATH = os.path.join(args.model_save_path, 'Model', 'Checkpoints', 'Temporal', TASK)
+LOG_FILE = os.path.join(args.model_save_path, 'Logs', 'Temporal', TASK)
+SAMPLES_PATH = os.path.join(args.model_save_path, 'Model', 'Sample', 'Temporal', TASK)
 
 if not os.path.exists(MODEL_SAVE_PATH):
     os.makedirs(MODEL_SAVE_PATH)
@@ -246,10 +227,10 @@ if not os.path.exists(LOG_FILE):
 if TASK == 'segmentation':
     # for each epoch record important metrics
     with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
-        epoch_log.write('epoch, train loss, val loss, train acc, val acc, train miou, val miou\n')
+        epoch_log.write('epoch, train loss, val loss, train acc, val acc, miou\n')
 
     with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as f:
-        f.write('Epoch, Batch Index, train loss, train acc, train miou\n')
+        f.write('Epoch, Batch Index, train loss, train acc\n')
 
 if TASK == 'depth':
     # for each epoch record important metrics
@@ -274,25 +255,15 @@ start_epoch = 0
 if cfg['training']['resume'] is not None:
     if os.path.isfile(cfg['training']['resume']):
         checkpoint = torch.load(cfg['training']['resume'])
-        from collections import OrderedDict
-        new_state_dict = OrderedDict()
-        for k, v in checkpoint.items():
-            if 'module' not in k:
-                k = 'module.' + k
-            else:
-                k = k.replace('features.module.', 'module.features.')
-            new_state_dict[k] = v
-
-        model.load_state_dict(new_state_dict)
         # checkpoint = torch.load(cfg['training']['resume'], map_location=lambda storage, loc: storage)  # load model trained on gpu on cpu
-        # model.load_state_dict(checkpoint["model_state"])
-        model_opt.load_state_dict(checkpoint["optimizer_state"])
+        model.load_state_dict(checkpoint["model_state"])
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
         scheduler.load_state_dict(checkpoint["scheduler_state"])
-        start_epoch = checkpoint["epoch"]
+        # start_iter = checkpoint["epoch"]
         print("Loaded checkpoint '{}' (iter {})".format(cfg['training']['resume'], checkpoint["epoch"]))
     else:
         print("No checkpoint found at '{}'".format(cfg['training']['resume']))
-print('here')
+
 # print('LOSS FORMAT: SEMANTIC_LOSS MEAN_IOU PIX_ACC | DEPTH_LOSS ABS_ERR REL_ERR <11.25 <22.5')
 train_batch = len(train_dataloader)
 test_batch = len(test_dataloader)
@@ -300,19 +271,16 @@ test_batch = len(test_dataloader)
 since = time.time()
 
 if TASK == 'segmentation':
-    # Set up metrics
     if not os.path.exists(os.path.join(SAMPLES_PATH, 'images')):
         os.makedirs(os.path.join(SAMPLES_PATH, 'images'))
     # Initialize metrics
     best_miou = 0.0
     metrics = {'train_loss': [],
                'train_acc': [],
-               'train_miou': [],
                'val_acc': [],
                'val_loss': [],
                'val_miou': []}
     criterion = torch.nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
-    # criterion = utils.FocalLoss(ignore_index=255, size_average=True)
 
 elif TASK == 'depth':
     if not os.path.exists(os.path.join(SAMPLES_PATH, 'images')):
@@ -326,8 +294,8 @@ elif TASK == 'depth':
                'val_rel_error': []}
     # criterion = torch.nn.MSELoss()
     # criterion = torch.nn.L1Loss()
-    # criterion = InverseDepthL1Loss()
-    criterion = L1LossIgnoredRegion()
+    # criterion = L1LossIgnoredRegion()
+    criterion = InverseDepthL1Loss()
 
 elif TASK == 'depth_segmentation':
     if not os.path.exists(os.path.join(SAMPLES_PATH, 'images')):
@@ -358,11 +326,14 @@ with mlflow.start_run():
     mlflow.log_param('training_batch_size', cfg["training"]["batch_size"])
     mlflow.log_param('number_of_workers', cfg["training"]["n_workers"])
     mlflow.log_param('backbone', BACKBONE)
-    mlflow.log_param('enocoder_backbone_resnet', deeplabv3_backbone)
+    mlflow.log_param('window_size', window_size)
+    mlflow.log_param('k', k)
+    mlflow.log_param('deeplabv3_backbone_slow', deeplabv3_backbone_slow)
+    mlflow.log_param('deeplabv3_backbone_fast', deeplabv3_backbone_fast)
     mlflow.log_param('encoder_pretrained', cfg["training"]["pretrain"])
     mlflow.log_param('dropout', drop_out)
     mlflow.log_param('model_optimizer', cfg["training"]["optimizer"]["name"])
-    mlflow.log_param('model_optimizer_lr', cfg["training"]["optimizer"]["lr"])
+    mlflow.log_param('model_optimizer_lr', cfg["training"]["optimizer"]["lr0"])
     for key, value in vars(args).items():
         mlflow.log_param(key, value)
 
@@ -441,7 +412,8 @@ with mlflow.start_run():
             # Validate
             if epoch % cfg['training']['val_interval'] == 0:
                 print('--- Validation ---')
-                val_rel_error, val_abs_error, val_loss = static_test_single_task(epoch, criterion, val_dataloader, model,
+                val_rel_error, val_abs_error, val_loss = static_test_single_task(epoch, criterion, val_dataloader,
+                                                                                 model,
                                                                                  TASK, classLabels, validClasses,
                                                                                  SAMPLES_PATH, void=0, maskColors=None,
                                                                                  save_val_imgs=True)
@@ -505,7 +477,8 @@ with mlflow.start_run():
                                                                                                 TASK, classLabels,
                                                                                                 validClasses,
                                                                                                 SAMPLES_PATH,
-                                                                                                void=0, maskColors=mask_colors,
+                                                                                                void=0,
+                                                                                                maskColors=mask_colors,
                                                                                                 args=None)
                 metrics['val_abs_error'].append(val_abs_err)
                 metrics['val_loss'].append(val_loss)
@@ -553,7 +526,7 @@ with mlflow.start_run():
 
     # Since the model was logged as an artifact, it can be loaded to make predictions
     print("\nLoading model to make predictions on test set")
-    loaded_model = mlflow.pytorch.load_model(mlflow.get_artifact_uri("pytorch-"+TASK+"-best"))
+    loaded_model = mlflow.pytorch.load_model(mlflow.get_artifact_uri("pytorch-" + TASK + "-best"))
 
     # run on test set
     print('--- Testing ---')

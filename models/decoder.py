@@ -323,58 +323,16 @@ class MultiDecoder(nn.Module):
         #     low_level_inplanes = 256
 
         # Segmentation
-        self.seg_conv1 = nn.Conv2d(input_dim, 256, 1, bias=False)
-        self.seg_bn1 = BatchNorm(256)
-        self.seg_relu = nn.ReLU()
-        self.seg_last_conv = nn.Sequential(
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
-            BatchNorm(256),
-            nn.ReLU(),
-            nn.Dropout(drop_out),
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
-            BatchNorm(256),
-            nn.ReLU(),
-            nn.Dropout(drop_out),
-            nn.Conv2d(256, num_classes[1], kernel_size=1, stride=1),
-        )
-
+        self.seg_decoder = SegDecoder(input_dim, num_classes[1], drop_out, BatchNorm)
         # Depth
-        self.depth_conv1 = nn.Conv2d(input_dim, 256, 1, bias=False)
-        self.depth_bn1 = BatchNorm(256)
-        self.depth_relu = nn.ReLU()
-        self.depth_last_conv = nn.Sequential(
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
-            BatchNorm(256),
-            nn.ReLU(),
-            nn.Dropout(drop_out),
-            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
-            BatchNorm(256),
-            nn.ReLU(),
-            nn.Dropout(drop_out),
-            nn.Conv2d(256, num_classes[0], kernel_size=1, stride=1),
-        )
-        self.depth_softplus = torch.nn.Softplus(beta=1, threshold=20)
-
+        self.depth_decoder = DepthDecoder(input_dim, num_classes[0], drop_out, BatchNorm)
         self._init_weight()
 
     def forward(self, x):
         # compute the depth
-        x1 = self.depth_conv1(x)
-        x2 = self.depth_bn1(x1)
-        x3 = self.depth_relu(x2)
-        # x = torch.cat((x, low_level_feat), dim=1)
-        x4 = F.interpolate(x3, size=(128, 256), mode="bilinear", align_corners=True)
-        x5 = self.depth_last_conv(x4)
-        depth_pred = self.depth_softplus(x5)
-
+        depth_pred = self.depth_decoder(x)
         # compute the segmentation
-        x = self.seg_conv1(x)
-        x = self.seg_bn1(x)
-        x = self.seg_relu(x)
-        # x = torch.cat((x, low_level_feat), dim=1)
-        x = F.interpolate(x, size=(128, 256), mode="bilinear", align_corners=True)
-        seg_pred = self.seg_last_conv(x)
-
+        seg_pred = self.seg_decoder(x)
         return depth_pred, seg_pred
 
     def _init_weight(self):

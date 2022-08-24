@@ -28,13 +28,24 @@ class ConfMatrix(object):
 
 def depth_error(x_pred, x_output):
     device = x_pred.device
-    binary_mask = (torch.sum(x_output, dim=1) != 0).unsqueeze(1).to(device)
+    # invalid_idx = -1
+    # binary_mask = (torch.sum(x_output, dim=1) != 0).unsqueeze(1).to(device)
+    binary_mask = (torch.sum(x_output, dim=1, keepdim=True) != -1).unsqueeze(1).to(device)
     x_pred_true = x_pred.masked_select(binary_mask)
     x_output_true = x_output.masked_select(binary_mask)
     abs_err = torch.abs(x_pred_true - x_output_true)
     rel_err = torch.abs(x_pred_true - x_output_true) / x_output_true
     return (torch.sum(abs_err) / torch.nonzero(binary_mask, as_tuple=False).size(0)).item(), \
            (torch.sum(rel_err) / torch.nonzero(binary_mask, as_tuple=False).size(0)).item()
+
+def depth_error2(pred, gt):
+    invalid_idx = -1
+    valid_mask = (torch.sum(gt, dim=1, keepdim=True) != invalid_idx).to(pred.device)
+    abs_err = torch.mean(torch.abs(pred - gt).masked_select(valid_mask)).item()
+    # rel_err = torch.mean((torch.abs(pred - gt)/gt).masked_select(valid_mask)).item()
+    # rel_err = torch.mean((torch.abs(pred - gt)/.masked_select(valid_mask)).item()
+    # rel_err = torch.mean(torch.abs(pred - gt).masked_select(valid_mask)).item()
+    return abs_err, 0
 
 
 """
@@ -285,6 +296,8 @@ def vislbl(label, mask_colors):
 
     # Convert train_ids to colors
     # label = torch.apply()
+    # print(label[i, j])
+    # print(mask_colors)
     converted_to_color = np.zeros((128, 256, 3), dtype=np.uint8)
     for i in range(128):
         for j in range(256):

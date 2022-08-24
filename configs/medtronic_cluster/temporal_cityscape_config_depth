@@ -20,7 +20,7 @@ data:
     test_split: test
     img_rows: 1025
     img_cols: 2049
-    path: /mnt/c44578a3-8e98-4fc3-a8b4-72266618fb8a/sam_dataset/data/cityscapes_temporal
+    path: /mnt/c44578a3-8e98-4fc3-a8b4-72266618fb8a/sam_dataset/data/cityscapes_static
 
 training:
     n_workers: 8

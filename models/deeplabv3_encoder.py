@@ -5,22 +5,21 @@ from models.resnet_encoder import ResNet50
 # from resnet_encoder import ResNet50
 from torchvision import models
 from tensorboardX import SummaryWriter
-
-
+from torchvision.models import resnet50, resnet18, resnet101, resnet34, resnet152
 class ResNet(nn.Module):
     def __init__(self, version='resnet50', in_channels=3, conv1_out=64):
         super(ResNet, self).__init__()
         if version == 'resnet50':
-            self.resnet = models.resnet50(pretrained=True)
+            self.resnet = resnet50(pretrained=True)
         elif version == 'resnet18':
-            self.resnet = models.resnet18(pretrained=True)
+            self.resnet = resnet18(pretrained=True)
         elif version == 'resnet101':
-            self.resnet = models.resnet101(pretrained=True)
+            self.resnet = resnet101(pretrained=True)
         elif version == 'resnet34':
-            self.resnet = models.resnet34(pretrained=True)
+            self.resnet = resnet34(pretrained=True)
         else:
             # version == 'resnet152':
-            self.resnet = models.resnet152(pretrained=True)
+            self.resnet = resnet152(pretrained=True)
 
         self.relu = nn.ReLU(inplace=True)
 
@@ -146,7 +145,6 @@ class DeepLabv3(nn.Module):
     def forward(self, x):
         _, _, h, w = x.shape
         x = self.resnet(x)
-        # print(x.shape)
         x = self.assp(x)
         # print(x.shape)
         # if self.backbone == 'resnet18':

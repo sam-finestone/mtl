@@ -8,7 +8,7 @@ import logging
 # from tensorboardX import SummaryWriter
 # from torchvision.datasets import Cityscapes
 from loader.cityscapes_loader import cityscapesLoader
-from loader.city_loader import staticLoader
+from loader.city_loader import cityscapesLoader2
 # from loader.video_dataset import *
 from utils.sort_dataset import *
 # from loader.nyuv2_dataloader import NYUV2
@@ -17,15 +17,11 @@ from models.mtl_model import MultiTaskModel
 from models.static_model import StaticTaskModel
 from models.deeplabv3_encoder import DeepLabv3
 from utils.train_helpers import *
-from utils.static_helpers import static_single_task_trainer, static_test_single_task, save_ckpt
+from utils.static_helpers import static_single_task_trainer, static_test_single_task
 from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback
 from utils.metrics import plot_learning_curves
-from loss.loss import InverseDepthL1Loss, L1LossIgnoredRegion
+from loss.loss import InverseDepthL1Loss
 from scheduler import get_scheduler
-# from deeplabv3plus import Deeplab_v3plus
-import deeplab
-from utils.metrics_seg import StreamSegMetrics
-from utils import ext_transforms as et
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 parser = argparse.ArgumentParser()
@@ -43,7 +39,6 @@ parser.add_argument('--dataset_mean', metavar='[0.485, 0.456, 0.406]',
 parser.add_argument('--dataset_std', metavar='[0.229, 0.224, 0.225]',
                     default=[0.229, 0.224, 0.225], type=list,
                     help='std for normalization')
-
 # uncomment for segmentation run
 # parser.add_argument("--config", default='configs/medtronic_cluster/static_cityscape_config_seg',
 #                     nargs="?", type=str, help="Configuration file to use")
@@ -87,68 +82,49 @@ TASK = cfg["model"]["tasks"]
 NAME_EXPERIMENT = 'experiment_static_' + TASK
 # mlflow.set_tracking_uri("http://10.167.61.230:5000")
 # mlflow.set_tracking_uri("https://mlflow-dev.touchsurgery.com")
-# mlflow.set_tracking_uri("https://mlflow-dev-ml-rs-staging.touchsurgery.com")
-# mlflow.set_tracking_uri('http://mlflow-server:5000')
 mlflow.set_experiment(experiment_name=NAME_EXPERIMENT)
 
-# train_augmentations = torch.nn.Sequential(transforms.Resize(size=(128, 256)),
-#                                           # transforms.RandomCrop(size=(256, 512)),
-#                                           transforms.RandomHorizontalFlip(p=0.5),
-#                                           # transforms.Normalize(mean=(123.675, 116.28, 103.53),
-#                                           #                      std=(58.395, 57.12, 57.375)),
-#                                           # transforms.Pad(padding=(256, 512))
-#                                           )
+train_augmentations = torch.nn.Sequential(transforms.Resize(size=(128, 256)),
+                                          # transforms.RandomCrop(size=(256, 512)),
+                                          transforms.RandomHorizontalFlip(p=0.5)
+                                          # transforms.Normalize(mean=(123.675, 116.28, 103.53),
+                                          #                      std=(58.395, 57.12, 57.375)),
+                                          # transforms.Pad(padding=(256, 512))
+                                          )
 
-# val_augmentations = torch.nn.Sequential(transforms.Resize(size=(128, 256)),
-#                                         # transforms.RandomCrop(size=(256, 512)),
-#                                         transforms.RandomHorizontalFlip(p=0.5),
-#                                         # transforms.Normalize(mean=(123.675, 116.28, 103.53),
-#                                         #                      std=(58.395, 57.12, 57.375)),
-#                                         # transforms.Pad(padding=(256, 512))
-#                                         )
-train_transform = et.ExtCompose([
-            et.ExtResize((128, 256)),
-            # et.ExtRandomCrop(size=(opts.crop_size, opts.crop_size)),
-            et.ExtColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
-            et.ExtRandomHorizontalFlip(),
-            et.ExtToTensor(),
-            et.ExtNormalize(mean=[0.485, 0.456, 0.406],
-                            std=[0.229, 0.224, 0.225]),
-        ])
-
-val_transform = et.ExtCompose([
-        et.ExtResize((128, 256)),
-        et.ExtToTensor(),
-        et.ExtNormalize(mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225]),
-    ])
+val_augmentations = torch.nn.Sequential(transforms.Resize(size=(128, 256)),
+                                        # transforms.RandomCrop(size=(256, 512)),
+                                        transforms.RandomHorizontalFlip(p=0.5)
+                                        # transforms.Normalize(mean=(123.675, 116.28, 103.53),
+                                        #                      std=(58.395, 57.12, 57.375)),
+                                        # transforms.Pad(padding=(256, 512))
+                                        )
 
 # Load the dataloaders
-print('Preprocessing Static ' + cfg["data"]["dataset"])
-train_set = staticLoader(DATASET_PATH,
-                         split=cfg["data"]["train_split"],
-                         transform=train_transform,
-                         test_mode=False,
-                         model_name=None,
-                         path_num=path_n)
-val_set = staticLoader(DATASET_PATH,
-                       split=cfg["data"]["val_split"],
-                       transform=val_transform,
-                       test_mode=True,
-                       model_name=None,
-                       path_num=path_n)
-test_set = staticLoader(DATASET_PATH,
-                        split=cfg["data"]["test_split"],
-                        transform=val_transform,
-                        test_mode=True,
-                        model_name=None,
-                        path_num=path_n)
+print('Preprocessing ' + cfg["data"]["dataset"])
+train_set = cityscapesLoader2(DATASET_PATH,
+                              split=cfg["data"]["train_split"],
+                              augmentations=train_augmentations,
+                              test_mode=False,
+                              model_name=None,
+                              path_num=path_n)
+val_set = cityscapesLoader2(DATASET_PATH,
+                            split=cfg["data"]["val_split"],
+                            augmentations=val_augmentations,
+                            test_mode=True,
+                            model_name=None,
+                            path_num=path_n)
+test_set = cityscapesLoader2(DATASET_PATH,
+                            split=cfg["data"]["test_split"],
+                            augmentations=val_augmentations,
+                            test_mode=True,
+                            model_name=None,
+                            path_num=path_n)
 
-print(train_set.num_classes)
 classLabels = val_set.class_names
 # print(len(classLabels))
 validClasses = val_set.valid_classes
-# mask_colors = val_set.colors
+mask_colors = val_set.colors
 void_class = val_set.void_classes
 
 train_dataloader = torch.utils.data.DataLoader(dataset=train_set,
@@ -187,50 +163,23 @@ elif TASK == 'depth_segmentation':
 
 # initialise multi (or single) - task model
 model = StaticTaskModel(enc, dec, TASK).to(device)
-# model = getattr(deeplab, 'resnet101')(
-#         pretrained=False,
-#         num_classes=19,
-#         num_groups=None,
-#         weight_std=False,
-#         beta=False)
-# model = Deeplab_v3plus(19).to(device)
-# Push model to GPU
-# model = model.to(device)
 
+# Push model to GPU
 if torch.cuda.is_available():
     model = torch.nn.DataParallel(model).to(device)
     print('Model pushed to {} GPU(s), type {}.'.format(torch.cuda.device_count(), torch.cuda.get_device_name(0)))
 
-# for m in model.modules():
-#     if isinstance(m, nn.BatchNorm2d):
-#       m.eval()
-#       m.weight.requires_grad = False
-#       m.bias.requires_grad = False
-# backbone_params = (
-#     list(model.module.conv1.parameters()) +
-#     list(model.module.bn1.parameters()) +
-#     list(model.module.layer1.parameters()) +
-#     list(model.module.layer2.parameters()) +
-#     list(model.module.layer3.parameters()) +
-#     list(model.module.layer4.parameters()))
-# last_params = list(model.module.aspp.parameters())
-# model_opt = optim.SGD([
-#   {'params': filter(lambda p: p.requires_grad, backbone_params)},
-#   {'params': filter(lambda p: p.requires_grad, last_params)}],
-#   lr=0.00025, momentum=0.9, weight_decay=0.0001)
-model_opt = optim.Adam(model.parameters(), lr=0.01)
+
+model_opt = optim.Adam(model.parameters(), lr=cfg["training"]["optimizer"]["lr"])
 # scheduler = get_scheduler(model_opt, cfg['training']['lr_schedule'])
-# model_opt = torch.optim.SGD(params=model.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-4)
-# model_opt = optim.SGD(model.parameters(), lr=cfg['training']["optimizer"]["lr"], momentum=0.9, weight_decay=0.0001)
 scheduler = optim.lr_scheduler.StepLR(model_opt,
-                                      step_size=10000,
-                                      gamma=0.1)
-# model_opt = optim.SGD(model.parameters(), lr=0.1, weight_decay=1e-4, momentum=0.9)
-#scheduler = optim.lr_scheduler.CosineAnnealingLR(model_opt, EPOCHS)
+                                      step_size=cfg["training"]["scheduler"]["step"],
+                                      gamma=cfg["training"]["scheduler"]["gamma"])
+
 # directory name to save the models
-MODEL_SAVE_PATH = os.path.join(args.model_save_path, 'Model', 'Checkpoints', 'Static', TASK)
-LOG_FILE = os.path.join(args.model_save_path, 'Logs', 'Static', TASK)
-SAMPLES_PATH = os.path.join(args.model_save_path, 'Model', 'Sample', 'Static', TASK)
+MODEL_SAVE_PATH = os.path.join(args.model_save_path, 'Model', 'Checkpoints', TASK)
+LOG_FILE = os.path.join(args.model_save_path, 'Logs', TASK)
+SAMPLES_PATH = os.path.join(args.model_save_path, 'Model', 'Sample', TASK)
 
 if not os.path.exists(MODEL_SAVE_PATH):
     os.makedirs(MODEL_SAVE_PATH)
@@ -269,30 +218,20 @@ if TASK == 'depth_segmentation':
         f.write('Epoch, Batch Index, train loss, train acc, train abs error, train rel error \n')
 
 LOG_FILE_NAME = 'log.txt'
-start_epoch = 0
+
 # Load the pretrained model
 if cfg['training']['resume'] is not None:
     if os.path.isfile(cfg['training']['resume']):
         checkpoint = torch.load(cfg['training']['resume'])
-        from collections import OrderedDict
-        new_state_dict = OrderedDict()
-        for k, v in checkpoint.items():
-            if 'module' not in k:
-                k = 'module.' + k
-            else:
-                k = k.replace('features.module.', 'module.features.')
-            new_state_dict[k] = v
-
-        model.load_state_dict(new_state_dict)
         # checkpoint = torch.load(cfg['training']['resume'], map_location=lambda storage, loc: storage)  # load model trained on gpu on cpu
-        # model.load_state_dict(checkpoint["model_state"])
-        model_opt.load_state_dict(checkpoint["optimizer_state"])
+        model.load_state_dict(checkpoint["model_state"])
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
         scheduler.load_state_dict(checkpoint["scheduler_state"])
-        start_epoch = checkpoint["epoch"]
+        # start_iter = checkpoint["epoch"]
         print("Loaded checkpoint '{}' (iter {})".format(cfg['training']['resume'], checkpoint["epoch"]))
     else:
         print("No checkpoint found at '{}'".format(cfg['training']['resume']))
-print('here')
+
 # print('LOSS FORMAT: SEMANTIC_LOSS MEAN_IOU PIX_ACC | DEPTH_LOSS ABS_ERR REL_ERR <11.25 <22.5')
 train_batch = len(train_dataloader)
 test_batch = len(test_dataloader)
@@ -300,7 +239,6 @@ test_batch = len(test_dataloader)
 since = time.time()
 
 if TASK == 'segmentation':
-    # Set up metrics
     if not os.path.exists(os.path.join(SAMPLES_PATH, 'images')):
         os.makedirs(os.path.join(SAMPLES_PATH, 'images'))
     # Initialize metrics
@@ -311,8 +249,7 @@ if TASK == 'segmentation':
                'val_acc': [],
                'val_loss': [],
                'val_miou': []}
-    criterion = torch.nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
-    # criterion = utils.FocalLoss(ignore_index=255, size_average=True)
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=train_set.ignore_index)
 
 elif TASK == 'depth':
     if not os.path.exists(os.path.join(SAMPLES_PATH, 'images')):
@@ -326,14 +263,12 @@ elif TASK == 'depth':
                'val_rel_error': []}
     # criterion = torch.nn.MSELoss()
     # criterion = torch.nn.L1Loss()
-    # criterion = InverseDepthL1Loss()
-    criterion = L1LossIgnoredRegion()
+    criterion = InverseDepthL1Loss()
 
 elif TASK == 'depth_segmentation':
     if not os.path.exists(os.path.join(SAMPLES_PATH, 'images')):
         os.makedirs(os.path.join(SAMPLES_PATH, 'images'))
     # Initialize metrics
-    best_miou = 0.0
     metrics = {'train_loss': [],
                'val_loss': [],
                'train_abs_error': [],
@@ -346,8 +281,8 @@ elif TASK == 'depth_segmentation':
                'val_miou': []}
     # criterion = torch.nn.MSELoss()
     # criterion = torch.nn.L1Loss()
-    # criterion = [InverseDepthL1Loss(), torch.nn.CrossEntropyLoss(ignore_index=train_set.ignore_index)]
-    criterion = [L1LossIgnoredRegion(), torch.nn.CrossEntropyLoss(ignore_index=train_set.ignore_index, reduction='mean')]
+    criterion = [InverseDepthL1Loss(), torch.nn.CrossEntropyLoss(ignore_index=train_set.ignore_index)]
+
 
 print('Beginning training...')
 with mlflow.start_run():
@@ -374,7 +309,7 @@ with mlflow.start_run():
     # lambda_weight = np.ones([2, EPOCHS])
 
     lowest_depth_error = float('inf')
-    for epoch in range(start_epoch, EPOCHS):
+    for epoch in range(EPOCHS):
 
         print('--- Training ---')
         if TASK == 'segmentation':
@@ -389,41 +324,42 @@ with mlflow.start_run():
                                                                                   train_miou))
 
             # Validate
-            if epoch % cfg['training']['val_interval'] == 0:
-                print('--- Validation ---')
-                val_acc, val_loss, val_miou = static_test_single_task(epoch, criterion, val_dataloader,
-                                                                      model, TASK, classLabels,
-                                                                      validClasses, SAMPLES_PATH, void=0,
-                                                                      maskColors=None, save_val_imgs=True)
-                metrics['val_acc'].append(val_acc)
-                metrics['val_loss'].append(val_loss)
-                metrics['val_miou'].append(val_miou)
+            print('--- Validation ---')
+            val_acc, val_loss, val_miou = static_test_single_task(epoch, criterion, val_dataloader,
+                                                                  model, TASK, classLabels,
+                                                                  validClasses, SAMPLES_PATH, void=0,
+                                                                  maskColors=mask_colors, args=args)
+            metrics['val_acc'].append(val_acc)
+            metrics['val_loss'].append(val_loss)
+            metrics['val_miou'].append(val_miou)
 
-                print('Epoch {} val loss: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch, val_loss, val_acc, val_miou))
-                # Save latest validation checkpoint
-                path_save_model = os.path.join(MODEL_SAVE_PATH, 'latest_val_checkpoint.pth.tar')
-                save_ckpt(path_save_model, model, model_opt, scheduler, metrics, val_miou, epoch)
-                # # Since the model was logged as an artifact, it can be loaded to make predictions
-                mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-trained", pickle_module=pickle)
-                print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
-                                                                     "pytorch-" + TASK + "-trained"))
-
-                # Save best model to file
-                if val_miou > best_miou:
-                    print('mIoU improved from {:.4f} to {:.4f}.'.format(best_miou, val_miou))
-                    best_miou = val_miou
-                    path_save_model = os.path.join(MODEL_SAVE_PATH, 'best_checkpoint.pth.tar')
-                    save_ckpt(path_save_model, model, model_opt, scheduler, metrics, best_miou, epoch)
-                    mlflow.log_metric('best_miou', best_miou)
-                    # print("\nLogging the trained model as a run artifact...")
-                    mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-best", pickle_module=pickle)
-
+            print('Epoch {} val loss: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch, val_loss, val_acc, val_miou))
             # Write segmentation logs
             with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
-                epoch_log.write('{}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, train_loss, val_loss, train_acc))
+                epoch_log.write('{}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f}\n'.format(
+                                epoch, train_loss, val_loss, train_acc, val_acc, val_miou))
             mlflow.log_artifact(os.path.join(LOG_FILE, 'log_epoch.txt'))
 
+            # Save checkpoint
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': model_opt.state_dict(),
+                'best_miou': best_miou,
+                'metrics': metrics,
+            }, MODEL_SAVE_PATH + '/checkpoint.pth.tar')
 
+            # Save best model to file
+            if val_miou > best_miou:
+                print('mIoU improved from {:.4f} to {:.4f}.'.format(best_miou, val_miou))
+                best_miou = val_miou
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                }, MODEL_SAVE_PATH + '/best_weights.pth.tar')
+                mlflow.log_metric('best_miou', best_miou)
+                print("\nLogging the trained model as a run artifact...")
+                mlflow.pytorch.log_model(model, artifact_path="pytorch-"+TASK+"-best", pickle_module=pickle)
 
         elif TASK == 'depth':
             train_loss, train_abs_err, train_rel_err = static_single_task_trainer(epoch, criterion, train_dataloader,
@@ -439,41 +375,49 @@ with mlflow.start_run():
                                                                                                  train_rel_err))
 
             # Validate
-            if epoch % cfg['training']['val_interval'] == 0:
-                print('--- Validation ---')
-                val_rel_error, val_abs_error, val_loss = static_test_single_task(epoch, criterion, val_dataloader, model,
-                                                                                 TASK, classLabels, validClasses,
-                                                                                 SAMPLES_PATH, void=0, maskColors=None,
-                                                                                 save_val_imgs=True)
-                metrics['val_abs_error'].append(val_abs_error)
-                metrics['val_loss'].append(val_loss)
-                metrics['val_rel_error'].append(val_rel_error)
+            print('--- Validation ---')
+            val_rel_error, val_abs_error, val_loss = static_test_single_task(epoch, criterion, val_dataloader, model,
+                                                                             TASK, classLabels, validClasses,
+                                                                             SAMPLES_PATH, void=0, maskColors=None,
+                                                                             args=None)
+            metrics['val_abs_error'].append(val_abs_error)
+            metrics['val_loss'].append(val_loss)
+            metrics['val_rel_error'].append(val_rel_error)
 
-                print('Epoch {} val loss: {:.4f}, val abs error: {:.4f}, val rel error: {:.4f}'.format(epoch,
-                                                                                                       val_loss,
-                                                                                                       val_abs_error,
-                                                                                                       val_rel_error))
-                # Save latest validation checkpoint
-                path_save_model = os.path.join(MODEL_SAVE_PATH, 'latest_val_checkpoint.pth.tar')
-                save_ckpt(path_save_model, model, model_opt, scheduler, metrics, val_abs_error, epoch)
-                print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
-                                                                     "pytorch-" + TASK + "-trained"))
-                # Save best model to file
-                if val_abs_error < lowest_depth_error:
-                    print('Val error improved from {:.4f} to {:.4f}.'.format(lowest_depth_error, val_abs_error))
-                    lowest_depth_error = val_abs_error
-                    path_save_model = os.path.join(MODEL_SAVE_PATH, 'best_checkpoint.pth.tar')
-                    save_ckpt(path_save_model, model, model_opt, scheduler, metrics, lowest_depth_error, epoch)
-                    mlflow.log_metric('best_abs_error', lowest_depth_error)
-                    mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-best", pickle_module=pickle)
-                    print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
-                                                                         "pytorch-" + TASK + "-best"))
-
+            print('Epoch {} val loss: {:.4f}, val abs error: {:.4f}, val rel error: {:.4f}'.format(epoch,
+                                                                                                   val_loss,
+                                                                                                   val_abs_error,
+                                                                                                   val_rel_error))
             # Write segmentation logs
             with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
                 epoch_log.write('{}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f} \n'.format(
                     epoch, train_loss, val_loss, train_abs_err, val_abs_error, train_rel_err, val_rel_error))
             mlflow.log_artifact(os.path.join(LOG_FILE, 'log_epoch.txt'))
+            # Save checkpoint
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': model_opt.state_dict(),
+                'val_abs_error': val_abs_error,
+                'metrics': metrics,
+            }, MODEL_SAVE_PATH + '/checkpoint.pth.tar')
+
+            # # Since the model was logged as an artifact, it can be loaded to make predictions
+            print("\nLogging the trained model as a run artifact...")
+            mlflow.pytorch.log_model(model, artifact_path="pytorch-"+TASK+"-trained", pickle_module=pickle)
+            print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(), "pytorch-" + TASK + "-trained"))
+
+            # Save best model to file
+            if val_abs_error < lowest_depth_error:
+                print('Val error improved from {:.4f} to {:.4f}.'.format(lowest_depth_error, val_abs_error))
+                lowest_depth_error = val_abs_error
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                }, MODEL_SAVE_PATH + '/best_weights.pth.tar')
+                mlflow.log_metric('lowest_depth_error', lowest_depth_error)
+                print("\nLogging the trained model as a run artifact...")
+                mlflow.pytorch.log_model(model, artifact_path="pytorch-"+TASK+"-best", pickle_module=pickle)
 
         elif TASK == 'depth_segmentation':
             train_loss, train_abs_err, train_rel_err, train_acc, train_miou = static_single_task_trainer(epoch,
@@ -498,43 +442,26 @@ with mlflow.start_run():
                                                                         train_miou))
 
             # Validate
-            if epoch % cfg['training']['val_interval'] == 0:
-                print('--- Validation ---')
-                val_loss, val_abs_err, val_rel_err, val_acc, val_miou = static_test_single_task(epoch, criterion,
-                                                                                                val_dataloader, model,
-                                                                                                TASK, classLabels,
-                                                                                                validClasses,
-                                                                                                SAMPLES_PATH,
-                                                                                                void=0, maskColors=mask_colors,
-                                                                                                args=None)
-                metrics['val_abs_error'].append(val_abs_err)
-                metrics['val_loss'].append(val_loss)
-                metrics['val_rel_error'].append(val_rel_err)
-                metrics['val_acc'].append(val_acc)
-                metrics['val_miou'].append(val_miou)
-                print('Epoch {} val loss: {:.4f}, abs error: {:.4f}, '
-                      'rel error: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch,
-                                                                            val_loss,
-                                                                            val_abs_err,
-                                                                            val_rel_err,
-                                                                            val_acc,
-                                                                            val_miou))
-                # Save latest validation checkpoint
-                path_save_model = os.path.join(MODEL_SAVE_PATH, 'latest_val_checkpoint.pth.tar')
-                save_ckpt(path_save_model, model, model_opt, scheduler, metrics, val_miou, epoch)
-                print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
-                                                                     "pytorch-" + TASK + "-trained"))
-                # Save best model to file
-                if val_abs_err < lowest_depth_error and val_miou > best_miou:
-                    print('Val error improved from {:.4f} to {:.4f}.'.format(lowest_depth_error, val_abs_err))
-                    lowest_depth_error = val_abs_err
-                    best_miou = val_miou
-                    save_ckpt(path_save_model, model, model_opt, scheduler, metrics, val_miou, epoch)
-                    mlflow.log_metric('best_abs_error', lowest_depth_error)
-                    mlflow.log_metric('best_miou', val_miou)
-                    mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-best", pickle_module=pickle)
-                    print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
-                                                                         "pytorch-" + TASK + "-best"))
+            print('--- Validation ---')
+            val_loss, val_abs_err, val_rel_err, val_acc, val_miou = static_test_single_task(epoch, criterion,
+                                                                                            val_dataloader, model,
+                                                                                            TASK, classLabels,
+                                                                                            validClasses,
+                                                                                            SAMPLES_PATH,
+                                                                                            void=0, maskColors=None,
+                                                                                            args=None)
+            metrics['val_abs_error'].append(val_abs_err)
+            metrics['val_loss'].append(val_loss)
+            metrics['val_rel_error'].append(val_rel_err)
+            metrics['val_acc'].append(val_acc)
+            metrics['val_miou'].append(val_miou)
+            print('Epoch {} val loss: {:.4f}, abs error: {:.4f}, '
+                  'rel error: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch,
+                                                                        val_loss,
+                                                                        val_abs_err,
+                                                                        val_rel_err,
+                                                                        val_acc,
+                                                                        val_miou))
             # Write segmentation logs
             with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
                 epoch_log.write('{}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, '
@@ -542,13 +469,38 @@ with mlflow.start_run():
                                                            val_abs_err, train_rel_err, val_rel_err,
                                                            train_acc, val_acc, train_miou, val_miou))
             mlflow.log_artifact(os.path.join(LOG_FILE, 'log_epoch.txt'))
+            # Save checkpoint
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': model_opt.state_dict(),
+                'val_abs_error': val_abs_error,
+                'metrics': metrics,
+            }, MODEL_SAVE_PATH + '/checkpoint.pth.tar')
+
+            # # Since the model was logged as an artifact, it can be loaded to make predictions
+            print("\nLogging the trained model as a run artifact...")
+            mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-trained", pickle_module=pickle)
+            print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(), "pytorch-" + TASK + "-trained"))
+
+            # Save best model to file
+            if val_abs_error < lowest_depth_error:
+                print('Val error improved from {:.4f} to {:.4f}.'.format(lowest_depth_error, val_abs_error))
+                lowest_depth_error = val_abs_error
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                }, MODEL_SAVE_PATH + '/best_weights.pth.tar')
+                mlflow.log_metric('lowest_depth_error', lowest_depth_error)
+                print("\nLogging the trained model as a run artifact...")
+                mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-best", pickle_module=pickle)
 
         # Track the metrics in mlflow
         for key, value in metrics.items():
             # get the most recent metric
             mlflow.log_metric(key, value[-1])
 
-    # plot_learning_curves(metrics, EPOCHS, SAMPLES_PATH, TASK)
+    plot_learning_curves(metrics, EPOCHS, SAMPLES_PATH, TASK)
     time_elapsed = time.time() - since
 
     # Since the model was logged as an artifact, it can be loaded to make predictions
@@ -565,7 +517,7 @@ with mlflow.start_run():
         test_acc, test_loss, test_miou = static_test_single_task(0, criterion, test_dataloader,
                                                                  loaded_model, TASK, classLabels,
                                                                  validClasses, SAMPLES_PATH, void=0,
-                                                                 maskColors=None, save_val_imgs=False)
+                                                                 maskColors=None, args=None)
         metrics_test['test_acc'].append(test_acc)
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_miou'].append(test_miou)
@@ -578,7 +530,7 @@ with mlflow.start_run():
         test_rel_error, test_abs_error, test_loss = static_test_single_task(0, criterion, test_dataloader,
                                                                             loaded_model, TASK, classLabels,
                                                                             validClasses, SAMPLES_PATH, void=0,
-                                                                            maskColors=None, save_val_imgs=None)
+                                                                            maskColors=None, args=None)
         metrics_test['test_abs_error'].append(test_abs_error)
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_rel_error'].append(test_rel_error)
@@ -600,7 +552,7 @@ with mlflow.start_run():
                                                                                                  validClasses,
                                                                                                  SAMPLES_PATH, void=0,
                                                                                                  maskColors=None,
-                                                                                                 save_val_imgs=None)
+                                                                                                 args=None)
         metrics_test['test_abs_error'].append(test_abs_error)
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_acc'].append(test_acc)

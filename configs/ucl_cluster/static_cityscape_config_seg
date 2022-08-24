@@ -1,5 +1,5 @@
 model:
-    arch: td2_fa
+    arch: slowfast
     backbone:
         encoder:
             type: deeplabv3
@@ -21,28 +21,29 @@ data:
     path: /lustre/home/zcqsspf/Scratch/data/cityscapes_static
 
 training:
-    n_workers: 8
-    train_iters: 10
-    batch_size: 4
+    n_workers: 4
+    train_iters: 500
+    batch_size: 8
     val_interval: 10
     print_interval: 2
     pretrain: True
     loss:
-        name: OhemCELoss2D
+        name: crossEntropyLoss
         thresh: 0.7
-        ignore_index: 250
+        ignore_index: 0
     optimizer:
         name: adaoptimizer
         momentum: 0.9
         wd: 1.0e-4
-        lr0: 1.0e-2
+        lr: 0.00025
         max_iter: 40000
         power: 0.9
         warmup_steps: 1000
         warmup_start_lr: 1.0e-5
+    lr_schedule:
     scheduler:
-        step: 5
-        gamma: 0.1
+        step: 100
+        gamma: 0.5
     train_augmentations:
         rotate: 5
         colorjtr: [0.5,0.5,0.5]

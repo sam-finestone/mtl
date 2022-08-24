@@ -5,13 +5,17 @@ import imageio
 import argparse
 import oyaml as yaml
 import re
-
+import torchvision.transforms as transforms
 from torch.utils import data
 import random
 # from ptsemseg.utils import recursive_glob
 # from ptsemseg.augmentations import Compose, RandomHorizontallyFlip, RandomRotate, Scale
 # from augmentations import *
-
+import cv2
+from PIL import Image as im
+import json
+from PIL import Image
+from collections import namedtuple
 
 def init_seed(manual_seed, en_cudnn=False):
     '''
@@ -49,49 +53,70 @@ def recursive_glob_set(rootdir=".", suffix=""):
     )
 
 
-class cityscapesLoader2(data.Dataset):
+class staticLoader(data.Dataset):
     """cityscapesLoader
 
     https://www.cityscapes-dataset.com
 
     Data is derived from CityScapes, and can be downloaded from here:
     https://www.cityscapes-dataset.com/downloads/
-
-    Many Thanks to @fvisin for the loader repo:
-    https://github.com/fvisin/dataset_loaders/blob/master/dataset_loaders/images/cityscapes.py
     """
+    # Based on https://github.com/mcordts/cityscapesScripts
+    CityscapesClass = namedtuple('CityscapesClass', ['name', 'id', 'train_id', 'category', 'category_id',
+                                                     'has_instances', 'ignore_in_eval', 'color'])
+    classes = [
+        CityscapesClass('unlabeled', 0, 255, 'void', 0, False, True, (0, 0, 0)),
+        CityscapesClass('ego vehicle', 1, 255, 'void', 0, False, True, (0, 0, 0)),
+        CityscapesClass('rectification border', 2, 255, 'void', 0, False, True, (0, 0, 0)),
+        CityscapesClass('out of roi', 3, 255, 'void', 0, False, True, (0, 0, 0)),
+        CityscapesClass('static', 4, 255, 'void', 0, False, True, (0, 0, 0)),
+        CityscapesClass('dynamic', 5, 255, 'void', 0, False, True, (111, 74, 0)),
+        CityscapesClass('ground', 6, 255, 'void', 0, False, True, (81, 0, 81)),
+        CityscapesClass('road', 7, 0, 'flat', 1, False, False, (128, 64, 128)),
+        CityscapesClass('sidewalk', 8, 1, 'flat', 1, False, False, (244, 35, 232)),
+        CityscapesClass('parking', 9, 255, 'flat', 1, False, True, (250, 170, 160)),
+        CityscapesClass('rail track', 10, 255, 'flat', 1, False, True, (230, 150, 140)),
+        CityscapesClass('building', 11, 2, 'construction', 2, False, False, (70, 70, 70)),
+        CityscapesClass('wall', 12, 3, 'construction', 2, False, False, (102, 102, 156)),
+        CityscapesClass('fence', 13, 4, 'construction', 2, False, False, (190, 153, 153)),
+        CityscapesClass('guard rail', 14, 255, 'construction', 2, False, True, (180, 165, 180)),
+        CityscapesClass('bridge', 15, 255, 'construction', 2, False, True, (150, 100, 100)),
+        CityscapesClass('tunnel', 16, 255, 'construction', 2, False, True, (150, 120, 90)),
+        CityscapesClass('pole', 17, 5, 'object', 3, False, False, (153, 153, 153)),
+        CityscapesClass('polegroup', 18, 255, 'object', 3, False, True, (153, 153, 153)),
+        CityscapesClass('traffic light', 19, 6, 'object', 3, False, False, (250, 170, 30)),
+        CityscapesClass('traffic sign', 20, 7, 'object', 3, False, False, (220, 220, 0)),
+        CityscapesClass('vegetation', 21, 8, 'nature', 4, False, False, (107, 142, 35)),
+        CityscapesClass('terrain', 22, 9, 'nature', 4, False, False, (152, 251, 152)),
+        CityscapesClass('sky', 23, 10, 'sky', 5, False, False, (70, 130, 180)),
+        CityscapesClass('person', 24, 11, 'human', 6, True, False, (220, 20, 60)),
+        CityscapesClass('rider', 25, 12, 'human', 6, True, False, (255, 0, 0)),
+        CityscapesClass('car', 26, 13, 'vehicle', 7, True, False, (0, 0, 142)),
+        CityscapesClass('truck', 27, 14, 'vehicle', 7, True, False, (0, 0, 70)),
+        CityscapesClass('bus', 28, 15, 'vehicle', 7, True, False, (0, 60, 100)),
+        CityscapesClass('caravan', 29, 255, 'vehicle', 7, True, True, (0, 0, 90)),
+        CityscapesClass('trailer', 30, 255, 'vehicle', 7, True, True, (0, 0, 110)),
+        CityscapesClass('train', 31, 16, 'vehicle', 7, True, False, (0, 80, 100)),
+        CityscapesClass('motorcycle', 32, 17, 'vehicle', 7, True, False, (0, 0, 230)),
+        CityscapesClass('bicycle', 33, 18, 'vehicle', 7, True, False, (119, 11, 32)),
+        CityscapesClass('license plate', -1, 255, 'vehicle', 7, False, True, (0, 0, 142)),
+    ]
 
-    colors = [[0, 0, 0],
-              [128, 64, 128],
-              [244, 35, 232],
-              [70, 70, 70],
-              [102, 102, 156],
-              [190, 153, 153],
-              [153, 153, 153],
-              [250, 170, 30],
-              [220, 220, 0],
-              [107, 142, 35],
-              [152, 251, 152],
-              [0, 130, 180],
-              [220, 20, 60],
-              [255, 0, 0],
-              [0, 0, 142],
-              [0, 0, 70],
-              [0, 60, 100],
-              [0, 80, 100],
-              [0, 0, 230],
-              [119, 11, 32],
-              ]
+    train_id_to_color = [c.color for c in classes if (c.train_id != -1 and c.train_id != 255)]
+    train_id_to_color.append([0, 0, 0])
+    train_id_to_color = np.array(train_id_to_color)
+    id_to_train_id = np.array([c.train_id for c in classes])
 
-    label_colours = dict(zip(range(20), colors))
-
-
+    # train_id_to_color = [(0, 0, 0), (128, 64, 128), (70, 70, 70), (153, 153, 153), (107, 142, 35),
+    #                      (70, 130, 180), (220, 20, 60), (0, 0, 142)]
+    # train_id_to_color = np.array(train_id_to_color)
+    # id_to_train_id = np.array([c.category_id for c in classes], dtype='uint8') - 1
 
     def __init__(
         self,
         root,
         split="train",
-        augmentations=None,
+        transform=None,
         test_mode=False,
         model_name=None,
         path_num=2,
@@ -107,13 +132,13 @@ class cityscapesLoader2(data.Dataset):
         self.path_num = path_num
         self.root = root
         self.split = split
-        self.augmentations = augmentations
+        self.transform = transform
         self.test_mode = test_mode
         self.model_name = model_name
         self.n_classes = 19
         self.files = {}
         self.seg_files = {}
-        self.colours = self.colors
+        # self.colours = self.colors
         self.images_base = os.path.join(self.root, "leftImg8bit", self.split)
         self.annotations_base = os.path.join(self.root, "gtFine", self.split)
         self.depth_base = os.path.join(self.root, "disparity", self.split)
@@ -122,9 +147,8 @@ class cityscapesLoader2(data.Dataset):
         # self.seg_files[split] = recursive_glob_set(rootdir=self.images_base, suffix=".png")
         # print(self.files[split][:500])
         # self.frame_start_indices = self.get_start_indices()
-        self.void_classes = [1, 2, 3, 4, 5, 6, 9, 10, 14, 15, 16, 18, 29, 30, -1]
+        self.void_classes = [0, 1, 2, 3, 4, 5, 6, 9, 10, 14, 15, 16, 18, 29, 30]
         self.valid_classes = [
-            0,
             7,
             8,
             11,
@@ -146,7 +170,6 @@ class cityscapesLoader2(data.Dataset):
             33,
         ]
         self.class_names = [
-            "unlabelled",
             "road",
             "sidewalk",
             "building",
@@ -168,13 +191,63 @@ class cityscapesLoader2(data.Dataset):
             "bicycle",
         ]
 
-        self.ignore_index = 0
-        self.class_map = dict(zip(self.valid_classes, range(20)))
+        with open('/home/sam/project/loader/cityscape_info.json', 'r') as fr:
+            labels_info = json.load(fr)
+        self.lb_map = {el['id']: el['trainId'] for el in labels_info}
+        self.lb_colors = {el['trainId']: el['color'] for el in labels_info}
+        self.num_classes = len(self.lb_map)
+        # print(len(self.lb_map))
+        # https://github.com/lorenmt/auto-lambda/blob/24591b7ff0d4498b18bd4b4c85c41864bdfc800a/create_dataset.py#L173
+        self.ignore_index = 19
+        self.depth_transform_train = transforms.Compose([
+                                                    transforms.Resize((128, 256)),
+                                                    transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
+                                                    transforms.RandomHorizontalFlip()
+                                                 ])
+        self.depth_transform_val = transforms.Compose([
+                                                        transforms.Resize((128, 256)),
+                                                    ])
+        # self.trans = transforms.Compose([
+        #                                 ColorJitter(
+        #                                     brightness = 0.5,
+        #                                     contrast = 0.5,
+        #                                     saturation = 0.5),
+        #                                 HorizontalFlip(),
+        #                                 # RandomScale((0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),
+        #                                 # RandomCrop(cfg.crop_size)
+        #                                 ])
+        self.class_map = dict(zip(self.valid_classes, range(19)))
 
         if not self.files[split]:
             raise Exception("No files for split=[%s] found in %s" % (split, self.images_base))
 
         print("Found %d %s images" % (len(self.files[split]), split))
+
+    @classmethod
+    def encode_target(cls, target):
+        return cls.id_to_train_id[np.array(target)]
+
+    @classmethod
+    def decode_target(cls, target):
+        target[target == 255] = 19
+        # target = target.astype('uint8') + 1
+        return cls.train_id_to_color[target]
+
+    @classmethod
+    def unmap_disparity(cls, disparity):
+        # https://github.com/mcordts/cityscapesScripts/issues/55#issuecomment-411486510
+        # remap invalid points to -1 (not to conflict with 0, infinite depth, such as sky)
+        # want to revrese this disparity = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+        disparity = (1 - (0)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+        disparity[disparity == -1] = 0
+        disparity[disparity > -1] = (disparity[disparity > -1] + 1) * (256 * 4)
+        # disparity = (1 - (0)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+        return disparity
+
+    @classmethod
+    def map_to_rgb(cls, disparity):
+        disparity = (244 - (-0)) *(disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+        return disparity
 
     def __len__(self):
         """__len__"""
@@ -196,33 +269,54 @@ class cityscapesLoader2(data.Dataset):
         vid_info = img_path.split('/')[-1].split('_')
         city, seq, cur_frame = vid_info[0], vid_info[1], vid_info[2]
         frame_id = int(cur_frame)
-        lbl = imageio.imread(lbl_path)
-        lbl = self.encode_segmap(np.array(lbl, dtype=np.uint8))
+        label_target = Image.open(lbl_path)
 
-        seg_label = torch.from_numpy(lbl).long()
-        seg_label = seg_label.reshape(1, seg_label.shape[0], seg_label.shape[1])
+        # labels = np.array(lbl, dtype=np.int64)
+        # label = labels[np.newaxis, :]
+        # # segmentation_label = self.convert_labels(label)
+        # labels = self.encode_segmap(labels)
 
         image_path = os.path.join(self.images_base, city, ("%s_%s_%06d_leftImg8bit.png" % (city, seq, frame_id)))
+        # image = imageio.imread(image_path)
+        image_pil = Image.open(image_path).convert('RGB')
+        # image = np.array(image)
+        if self.transform is not None:
+            image, label_target = self.transform(image_pil, label_target)
+            # label_target = self.augmentations(label_target)
+        label_target = self.encode_target(label_target)
+        # lbl = imageio.imread(lbl_path)
+        # lbl = self.encode_segmap(np.array(lbl, dtype=np.uint8))
+        label_target = torch.from_numpy(label_target).long()
+        # label_target = label_target.reshape(1, label_target.shape[0], label_target.shape[1])
+
+        # image = torch.from_numpy(image).permute(2, 0, 1).float()
+
         depth_path = os.path.join(self.depth_base, city, ("%s_%s_%06d_disparity.png" % (city, seq, frame_id)))
-        image = imageio.imread(image_path)
-        image = np.array(image, dtype=np.uint8)
-        image = torch.from_numpy(image).permute(2, 0, 1).float()
+        # depth_img = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
+        # depth_img_tensor = torch.from_numpy(depth_img).float()
+        depth_img = Image.open(depth_path)
+        # depth_np = np.asarray(depth, dtype=np.uint8) # without dtype for display
 
-        depth = imageio.imread(depth_path)
-        depth = np.array(depth, dtype=np.uint8)
-        depth = torch.from_numpy(depth).float()
-        depth_reshaped = depth.reshape(1, depth.shape[0], depth.shape[1])
+        # disparity = torch.from_numpy(self.map_disparity(depth)).unsqueeze(0).float()
+        # depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
 
-        if self.augmentations is not None:
-            image = self.augmentations(image)
-            depth_labels = self.augmentations(depth_reshaped)
-            segmentation_label = self.augmentations(seg_label)
-
+        # print(depth_normalized.max()) - 1.0
+        # print(depth_normalized.min()) - -1.0
         if self.split == 'val' or self.split == 'test':
+            _, depth_labels = self.transform(image_pil, depth_img)
+            # disparity = torch.from_numpy(self.map_disparity(depth_labels.float())).unsqueeze(0).float()
+            disparity = self.map_disparity(depth_labels.float()).unsqueeze(0).float()
+            depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
             img_path = "%s_%s_%06d_leftImg8bit" % (city, seq, frame_id)
-            return image, segmentation_label, depth_labels, img_path
+            return image, label_target, depth_normalized, img_path
 
-        return image, segmentation_label, depth_labels
+        # depth_labels = self.depth_transform_train(depth_img_tensor)
+        _, depth_labels = self.transform(image_pil, depth_img)
+        # disparity = torch.from_numpy(self.map_disparity(depth_labels.float())).unsqueeze(0).float()
+        # print(depth_labels.shape)
+        disparity = self.map_disparity(depth_labels.float()).unsqueeze(0).float()
+        depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+        return image, label_target, depth_normalized
 
     def decode_segmap(self, temp):
         r = temp.copy()
@@ -253,6 +347,52 @@ class cityscapesLoader2(data.Dataset):
             mask[mask == _predc] = self.valid_classes[_predc]
         return mask.astype(np.uint8)
 
+    def map_disparity(self, disparity):
+        # https://github.com/mcordts/cityscapesScripts/issues/55#issuecomment-411486510
+        # remap invalid points to -1 (not to conflict with 0, infinite depth, such as sky)
+        disparity[disparity == 0] = -1
+        disparity[disparity > -1] = (disparity[disparity > -1] - 1) / (256 * 4)
+        return disparity
+
+    def convert_labels(self, label):
+        for k, v in self.lb_map.items():
+            label[label == k] = v
+        return label
+
+    def preprocess(self, image, mask, flip=False, scale=None, crop=None):
+        if flip:
+            if random.random() < 0.5:
+              image = image.transpose(Image.FLIP_LEFT_RIGHT)
+              mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
+        if scale:
+            w, h = image.size
+            rand_log_scale = math.log(scale[0], 2) + random.random() * (math.log(scale[1], 2) - math.log(scale[0], 2))
+            random_scale = math.pow(2, rand_log_scale)
+            new_size = (int(round(w * random_scale)), int(round(h * random_scale)))
+            image = image.resize(new_size, Image.ANTIALIAS)
+            mask = mask.resize(new_size, Image.NEAREST)
+
+        data_transforms = transforms.Compose([
+                                              transforms.ToTensor(),
+                                              transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+                                             ])
+        image = data_transforms(image)
+        mask = torch.LongTensor(np.array(mask).astype(np.int64))
+
+        if crop:
+            h, w = image.shape[1], image.shape[2]
+            pad_tb = max(0, crop[0] - h)
+            pad_lr = max(0, crop[1] - w)
+            image = torch.nn.ZeroPad2d((0, pad_lr, 0, pad_tb))(image)
+            mask = torch.nn.ConstantPad2d((0, pad_lr, 0, pad_tb), 255)(mask)
+
+            h, w = image.shape[1], image.shape[2]
+            i = random.randint(0, h - crop[0])
+            j = random.randint(0, w - crop[1])
+            image = image[:, i:i + crop[0], j:j + crop[1]]
+            mask = mask[i:i + crop[0], j:j + crop[1]]
+
+        return image, mask
 # key2aug = {
 #     "rcrop": RandomCrop,
 #     "hflip": RandomHorizontallyFlip,
@@ -279,61 +419,81 @@ class cityscapesLoader2(data.Dataset):
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-
-    parser = argparse.ArgumentParser(description="config")
-    parser.add_argument(
-        "--config",
-        nargs="?",
-        type=str,
-        help="Configuration file to use",
-    )
-
-    args = parser.parse_args()
-
-    with open(args.config) as fp:
-        cfg = yaml.safe_load(fp)
-
-    init_seed(11733, en_cudnn=False)
-    print('starting training')
-    # Setup Augmentations
-    # train_augmentations = cfg["training"].get("train_augmentations", None)
-    # t_data_aug = get_composed_augmentations(train_augmentations)
-    # val_augmentations = cfg["validating"].get("val_augmentations", None)
-    # v_data_aug = get_composed_augmentations(val_augmentations)
-
-    # Setup Dataloader
-
-    path_n = cfg["model"]["path_num"]
-
-    # data_loader = get_loader(cfg["data"]["dataset"])
-    data_path = cfg["data"]["path"]
-
-    train_augmentations = torch.nn.Sequential(
-                                            transforms.Resize(size=(2048, 1024)),
-                                            transforms.RandomCrop(size=(512, 1024)),
-                                            transforms.RandomHorizontalFlip(p=0.5),
-                                            # transforms.Normalize(mean=(123.675, 116.28, 103.53),
-                                            #                      std=(58.395, 57.12, 57.375)),
-                                            transforms.Pad(padding=(512, 1024)))
-
-    t_loader = cityscapesLoader(data_path, split=cfg["data"]["train_split"], augmentations=train_augmentations, path_num=path_n)
-    # v_loader = cityscapesLoader(data_path, split=cfg["data"]["val_split"], augmentations=v_data_aug, path_num=path_n)
-
-    trainloader = data.DataLoader(t_loader,
-                                  batch_size=cfg["training"]["batch_size"],
-                                  num_workers=cfg["training"]["n_workers"],
-                                  shuffle=False,
-                                  drop_last=True)
-
     # augmentations = Compose([Scale(2048), RandomRotate(10), RandomHorizontallyFlip(0.5)])
+    DATASET_PATH = '/mnt/c44578a3-8e98-4fc3-a8b4-72266618fb8a/sam_dataset/data/cityscapes_static'
+    example_depth = os.path.join(DATASET_PATH, 'disparity/train/aachen/aachen_000000_000019_disparity.png')
+    ex_depth = imageio.imread(example_depth)
+    plt.imshow(ex_depth)
+    plt.savefig('/home/sam/project/img_depth.png')
+
+    train_augmentations = torch.nn.Sequential(transforms.Resize(size=(128, 256))
+                                              # transforms.RandomCrop(size=(256, 512)),
+                                              # transforms.RandomHorizontalFlip(p=0.5),
+                                              # transforms.Normalize(mean=(123.675, 116.28, 103.53),
+                                              #                      std=(58.395, 57.12, 57.375)),
+                                              # transforms.Pad(padding=(256, 512))
+                                              )
+    train_set = staticLoader(DATASET_PATH,
+                              split='train',
+                              augmentations=train_augmentations,
+                              test_mode=False,
+                              model_name=None, path_num=2)
+
+    train_dataloader = torch.utils.data.DataLoader(dataset=train_set,
+                                                   batch_size=4,
+                                                   shuffle=False,
+                                                   num_workers=2,
+                                                   drop_last=True)
+
+    for batch_idx, (inputs, labels, depth) in enumerate(train_dataloader):
+        plt.figure(figsize=(10, 10))
+        # print(inputs[0].shape)
+        # print(labels[0].shape)
+        # print(depth[0].shape)
+        # print(torch.max(inputs[0]))
+        # print(torch.min(inputs[0]))
+        #
+        # print(torch.max(labels[0]))
+        # print(torch.min(labels[0]))
+        #
+        # print(torch.max(depth[0]))
+        # print(torch.min(depth[0]))
+        print(inputs.shape)
+        print(labels.shape)
+        print(depth.shape)
+        plt.imshow(labels[0].squeeze())
+        # data.save('/home/sam/project/depth.png')
+        plt.savefig('/home/sam/project/seg_gt.png')
+        imgs = inputs.data.numpy()
+        img_input = np.transpose(imgs[0], (1, 2, 0))
+        cv2.imwrite('/home/sam/project/img.png', img_input)
+        # lbl_input = np.transpose(lbl[0], (1, 2, 0))
+        # print(labels.shape)
+        # cv2.imwrite('/home/sam/project/seg.png', labels[0, :, :].squeeze().numpy())
+
+        # print(np.transpose(inputs[0].data.numpy(), (1, 2, 0)).shape)
+        # plt.imshow(np.transpose(inputs[0].data.numpy(), (1, 2, 0)))
+        # plt.savefig('/home/sam/project/img_rbg.png')
+        # plt.imshow(depth[0].numpy().squeeze())
+        # plt.savefig('/home/sam/project/img_depth.png')
+        # depth = depth.data.numpy()
+        # img_input = np.transpose(depth[0], (1, 2, 0))
+        # cv2.imwrite('/home/sam/project/img.png', img_input)
+
+        plt.imshow(depth[0].squeeze())
+        # data.save('/home/sam/project/depth.png')
+        plt.savefig('/home/sam/project/depth.png')
+        break
 
 
-    # scripted_transforms = torch.jit.script(transforms)
-    # local_path = "/home/zcqsspf/Scratch/data/cityscapes"
-    # dst = cityscapesLoader(local_path, augmentations=augmentations)
-    # bs = 4
-    # trainloader = data.DataLoader(dst, batch_size=bs, num_workers=0)
-    for i, data_samples in enumerate(trainloader):
-        imgs, segmentation_labels = data_samples
-        print(imgs.shape)
-        print(segmentation_labels.shape)
+    # img = train_features[0].squeeze()
+    # label = seg_labels[0]
+    # plt.imshow(img, cmap="gray")
+    # plt.show()
+    # print(f"Label: {label}")
+    #
+    # datapath = '~/Users/finess2/Desktop/ucf101/UCF101/UCF-101'
+    # train_dataloader = DataLoader(VideoDataset(datapath, mode='train'), batch_size=10, shuffle=True, num_workers=0)
+    #
+
+    print('finished')

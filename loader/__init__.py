@@ -1,9 +1,9 @@
 import json
 
 from loader.cityscapes_loader import cityscapesLoader
-from loader.city_loader import cityscapesLoader2
-from loader.temporal_loader import temporal_loader
-
+from loader.city_loader import staticLoader
+from loader.temporal_loader import temporalLoader
+from loader.cityscapes import Cityscapes
 def get_loader(name):
     """get_loader
 

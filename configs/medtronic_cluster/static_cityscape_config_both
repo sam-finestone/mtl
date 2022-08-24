@@ -8,8 +8,8 @@ model:
     path_num: 2
     window_size: 5
     frames_per_segment: 48
-    tasks: depth_segmentation # depth and segmentation
-    task_classes: [1, 20] # first has to be depth and second seg
+    tasks: depth_segmentation # depth or segmentation
+    task_classes: [1,19]
 
 data:
     dataset: cityscapes
@@ -22,9 +22,9 @@ data:
 
 training:
     n_workers: 4
-    train_iters: 500
+    train_iters: 2
     batch_size: 8
-    val_interval: 10
+    val_interval: 1
     print_interval: 2
     pretrain: True
     loss:
@@ -35,15 +35,14 @@ training:
         name: adaoptimizer
         momentum: 0.9
         wd: 1.0e-4
-        lr: 1.0e-4
+        lr: 1.0e-2
         max_iter: 40000
         power: 0.9
         warmup_steps: 1000
         warmup_start_lr: 1.0e-5
-    lr_scheduler:
     scheduler:
-        step: 100
-        gamma: 0.5
+        step: 5
+        gamma: 0.1
     train_augmentations:
         rotate: 5
         colorjtr: [0.5,0.5,0.5]

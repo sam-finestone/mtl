@@ -3,13 +3,16 @@ model:
     backbone:
         encoder:
             type: deeplabv3
-            resnet_version: resnet50 # resnet50 or resnet18 or resnset101
+            resnet_slow: resnet50 # resnet50 or resnet18 or resnset101
+            resnet_fast: resnet18 # resnet50 or resnet18 or resnset101
     dropout: 0.5
     path_num: 2
     window_size: 5
+    version: basic
+    k: 4
     frames_per_segment: 48
     tasks: segmentation # depth or segmentation
-    task_classes: 20
+    task_classes: 19
 
 data:
     dataset: cityscapes
@@ -21,10 +24,10 @@ data:
     path: /mnt/c44578a3-8e98-4fc3-a8b4-72266618fb8a/sam_dataset/data/cityscapes_static
 
 training:
-    n_workers: 8
-    train_iters: 10
-    batch_size: 8
-    val_interval: 10
+    n_workers: 4
+    train_iters: 2
+    batch_size: 4
+    val_interval: 1
     print_interval: 2
     pretrain: True
     loss:
