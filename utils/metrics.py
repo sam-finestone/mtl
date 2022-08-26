@@ -40,7 +40,8 @@ def depth_error(x_pred, x_output):
 
 def depth_error2(pred, gt):
     invalid_idx = -1
-    valid_mask = (torch.sum(gt, dim=1, keepdim=True) != invalid_idx).to(pred.device)
+    # valid_mask = (torch.sum(gt, dim=1, keepdim=True) != invalid_idx).to(pred.device)
+    valid_mask = (gt != invalid_idx).to(pred.device)
     abs_err = torch.mean(torch.abs(pred - gt).masked_select(valid_mask)).item()
     # rel_err = torch.mean((torch.abs(pred - gt)/gt).masked_select(valid_mask)).item()
     # rel_err = torch.mean((torch.abs(pred - gt)/.masked_select(valid_mask)).item()

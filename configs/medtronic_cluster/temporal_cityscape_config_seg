@@ -8,7 +8,7 @@ model:
     dropout: 0.5
     path_num: 2
     window_size: 5
-    version: basic
+    version: average_fusion
     k: 4
     frames_per_segment: 48
     tasks: segmentation # depth or segmentation
@@ -25,9 +25,9 @@ data:
 
 training:
     n_workers: 4
-    train_iters: 2
-    batch_size: 4
-    val_interval: 1
+    train_iters: 200
+    batch_size: 8
+    val_interval: 10
     print_interval: 2
     pretrain: True
     loss:

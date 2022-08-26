@@ -13,15 +13,15 @@ from loader.temporal_loader import temporalLoader
 # from loader.video_dataset import *
 from utils.sort_dataset import *
 # from loader.nyuv2_dataloader import NYUV2
-from models.decoder import Decoder, SegDecoder, DepthDecoder, MultiDecoder
-from models.mtl_model import MultiTaskModel1
+from models.decoder import Decoder, SegDecoder, DepthDecoder, MultiDecoder, SegDecoderTemporal
+from models.mtl_model import TemporalModel
 from models.static_model import StaticTaskModel
 from models.deeplabv3_encoder import DeepLabv3
 from utils.train_helpers import *
 # from utils.static_helpers import static_single_task_trainer, static_test_single_task, save_ckpt
 from utils.temporal_helpers import static_single_task_trainer, static_test_single_task, save_ckpt
 
-from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback
+from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback, SynchronizedBatchNorm3d
 from utils.metrics import plot_learning_curves
 from loss.loss import InverseDepthL1Loss, L1LossIgnoredRegion
 from scheduler import get_scheduler
@@ -182,20 +182,15 @@ encoder_fast = DeepLabv3(deeplabv3_backbone_fast).to(device)
 # initialise decoders (one for each task)
 drop_out = cfg["model"]["dropout"]
 version = cfg["model"]["version"]
+
 # version = 'advers'
-if TASK == 'segmentation':
-    if version == 'basic':
-        input_dim_decoder = 512
-    if version == 'advers':
-        input_dim_decoder = 5
-    dec = SegDecoder(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm1d).to('cuda:0')
-elif TASK == 'depth':
-    dec = DepthDecoder(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm1d).to(device)
-elif TASK == 'depth_segmentation':
-    dec = MultiDecoder(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm1d).to(device)
+version = 'convnet_fusion'
+# version = 'global_atten_fusion'
+# version = 'conv3d_fusion'
+# version = 'average_fusion'
 
 # initialise multi (or single) - task model
-model = MultiTaskModel1(encoder_slow, encoder_fast, [dec], k, version=version, mulit_task=False).to(device)
+model = TemporalModel(encoder_slow, encoder_fast, TASK, CLASS_TASKS, drop_out, k, version=version, mulit_task=False).to(device)
 # model = model.to(device)
 # Push model to GPU
 if torch.cuda.is_available():
@@ -209,9 +204,9 @@ scheduler = optim.lr_scheduler.StepLR(model_opt,
                                       gamma=cfg["training"]["scheduler"]["gamma"])
 
 # directory name to save the models
-MODEL_SAVE_PATH = os.path.join(args.model_save_path, 'Model', 'Checkpoints', 'Temporal', TASK)
-LOG_FILE = os.path.join(args.model_save_path, 'Logs', 'Temporal', TASK)
-SAMPLES_PATH = os.path.join(args.model_save_path, 'Model', 'Sample', 'Temporal', TASK)
+MODEL_SAVE_PATH = os.path.join(args.model_save_path, 'Model', 'Checkpoints', 'Temporal', version, TASK)
+LOG_FILE = os.path.join(args.model_save_path, 'Logs', 'Temporal', TASK, version)
+SAMPLES_PATH = os.path.join(args.model_save_path, 'Model', 'Sample', 'Temporal', version, TASK)
 
 if not os.path.exists(MODEL_SAVE_PATH):
     os.makedirs(MODEL_SAVE_PATH)
@@ -271,16 +266,19 @@ test_batch = len(test_dataloader)
 since = time.time()
 
 if TASK == 'segmentation':
+    # Set up metrics
     if not os.path.exists(os.path.join(SAMPLES_PATH, 'images')):
         os.makedirs(os.path.join(SAMPLES_PATH, 'images'))
     # Initialize metrics
     best_miou = 0.0
     metrics = {'train_loss': [],
                'train_acc': [],
+               'train_miou': [],
                'val_acc': [],
                'val_loss': [],
                'val_miou': []}
     criterion = torch.nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
+    # criterion = utils.FocalLoss(ignore_index=255, size_average=True)
 
 elif TASK == 'depth':
     if not os.path.exists(os.path.join(SAMPLES_PATH, 'images')):
@@ -294,8 +292,8 @@ elif TASK == 'depth':
                'val_rel_error': []}
     # criterion = torch.nn.MSELoss()
     # criterion = torch.nn.L1Loss()
-    # criterion = L1LossIgnoredRegion()
-    criterion = InverseDepthL1Loss()
+    # criterion = InverseDepthL1Loss()
+    criterion = L1LossIgnoredRegion()
 
 elif TASK == 'depth_segmentation':
     if not os.path.exists(os.path.join(SAMPLES_PATH, 'images')):

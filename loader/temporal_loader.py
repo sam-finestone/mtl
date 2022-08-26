@@ -255,7 +255,7 @@ class temporalLoader(data.Dataset):
 
     def __len__(self):
         """__len__"""
-        return len(self.files[self.split])*self.window_size
+        return len(self.files[self.split])
 
     def __getitem__(self, index):
         """__getitem__

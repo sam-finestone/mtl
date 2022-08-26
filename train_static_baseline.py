@@ -13,14 +13,14 @@ from loader.city_loader import staticLoader
 from utils.sort_dataset import *
 # from loader.nyuv2_dataloader import NYUV2
 from models.decoder import Decoder, SegDecoder, DepthDecoder, MultiDecoder
-from models.mtl_model import MultiTaskModel
+from models.mtl_model import TemporalModel
 from models.static_model import StaticTaskModel
 from models.deeplabv3_encoder import DeepLabv3
 from utils.train_helpers import *
 from utils.static_helpers import static_single_task_trainer, static_test_single_task, save_ckpt
 from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback
 from utils.metrics import plot_learning_curves
-from loss.loss import InverseDepthL1Loss, L1LossIgnoredRegion
+from loss.loss import InverseDepthL1Loss, L1LossIgnoredRegion, InverseDepthL1Loss2
 from scheduler import get_scheduler
 # from deeplabv3plus import Deeplab_v3plus
 import deeplab
@@ -218,13 +218,15 @@ if torch.cuda.is_available():
 #   {'params': filter(lambda p: p.requires_grad, backbone_params)},
 #   {'params': filter(lambda p: p.requires_grad, last_params)}],
 #   lr=0.00025, momentum=0.9, weight_decay=0.0001)
-model_opt = optim.Adam(model.parameters(), lr=0.01)
+# seg was 0.01
+model_opt = optim.Adam(model.parameters(), lr=0.0001)
 # scheduler = get_scheduler(model_opt, cfg['training']['lr_schedule'])
 # model_opt = torch.optim.SGD(params=model.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-4)
 # model_opt = optim.SGD(model.parameters(), lr=cfg['training']["optimizer"]["lr"], momentum=0.9, weight_decay=0.0001)
+# seg was step_size = 1000 and gamma=0.1
 scheduler = optim.lr_scheduler.StepLR(model_opt,
-                                      step_size=10000,
-                                      gamma=0.1)
+                                      step_size=100,
+                                      gamma=0.5)
 # model_opt = optim.SGD(model.parameters(), lr=0.1, weight_decay=1e-4, momentum=0.9)
 #scheduler = optim.lr_scheduler.CosineAnnealingLR(model_opt, EPOCHS)
 # directory name to save the models
@@ -327,7 +329,8 @@ elif TASK == 'depth':
     # criterion = torch.nn.MSELoss()
     # criterion = torch.nn.L1Loss()
     # criterion = InverseDepthL1Loss()
-    criterion = L1LossIgnoredRegion()
+    criterion = InverseDepthL1Loss2()
+    # criterion = L1LossIgnoredRegion()
 
 elif TASK == 'depth_segmentation':
     if not os.path.exists(os.path.join(SAMPLES_PATH, 'images')):

@@ -90,16 +90,12 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
 
         if task == 'depth':
             task_pred = model(inputs)
-            # print(task_pred.type())
-            # print(gt_depth.type())
-            # print(task_pred[0].squeeze().shape)
-            # print(gt_depth[0].squeeze().shape)
-            # pred_target = train_loader.dataset.unmap_disparity(task_pred[0].squeeze())
-            # img_gt = train_loader.dataset.unmap_disparity(gt_depth[0].squeeze())
-            # print('predcited image max value: ' + str(pred_target.max()))
-            # print('predcited image min value: ' + str(pred_target.min()))
-            # print('actual image max value: ' + str(img_gt.max()))
-            # print('actual image min value: ' + str(img_gt.min()))
+            print(task_pred.shape)
+            print(gt_depth.shape)
+            # print(gt_depth[0])
+            # print(task_pred[0])
+            # task_pred = task_pred.squeeze()
+            # gt_depth = gt_depth.squeeze()
             loss = criterion(task_pred, gt_depth)
             loss.backward()
             model_opt.step()
@@ -110,7 +106,7 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             loss_running.update(loss, bs)
 
             # compute the depth metrics
-            # abs_err, rel_err = depth_error2(task_pred, gt_depth)
+            # abs_err, rel_err = depth_error(task_pred, gt_depth)
             abs_err, rel_err = depth_error2(task_pred, gt_depth)
             abs_error_running.update(abs_err)
             rel_error_running.update(rel_err)
@@ -273,7 +269,7 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                     pred_depth_ = task_pred.data.cpu().numpy()
                     for i in range(inputs.size(0)):
                         filename = filepath[i]
-                        save_visualization_depth(i, imgs, pred_depth_, gt_depth_, filename, test_loader, folder)
+                        save_visualization_depth(i, epoch, imgs, pred_depth_, gt_depth_, filename, test_loader, folder)
 
             if task == 'depth_segmentation':
                 depth_pred, seg_pred = single_task_model(inputs)
@@ -390,16 +386,20 @@ def save_visualization_segmentation(index, epoch, imgs, seg_pred, gt_semantic_la
     mlflow.log_artifact(folder + '/images/{}_epoch_{}_gt.png'.format(filename, epoch))
     mlflow.log_artifact(folder + '/images/{}_epoch_{}_pred.png'.format(filename, epoch))
 
-def save_visualization_depth(index, imgs, pred_depth_, gt_depth_, filename, loader, folder):
+def save_visualization_depth(index, epoch, imgs, pred_depth_, gt_depth_, filename, loader, folder):
     denorm = Denormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     # img_input = np.transpose(imgs[index], (1, 2, 0))
     img_input = (denorm(imgs[index]) * 255).transpose(1, 2, 0).astype(np.uint8)
     # pred_target = pred_depth_[index][0] / 255
     # pred_target = loader.dataset.unmap_disparity(pred_depth_[index][0])
-    # pred_target = pred_depth_[index][0]  # [128, 256]
-    pred_target = loader.dataset.map_to_rgb(pred_depth_[index][0])
-    # img_gt = gt_depth_[index][0] / 255
-    img_gt = loader.dataset.map_to_rgb(gt_depth_[index][0])
+    pred_target = pred_depth_[index][0]  # [128, 256]
+    pred_target = cv2.normalize(pred_target, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    pred_target = pred_target.astype(np.uint8)
+    # pred_target = loader.dataset.map_to_rgb(pred_depth_[index][0])
+    img_gt = gt_depth_[index][0]
+    img_gt = cv2.normalize(img_gt, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    img_gt = img_gt.astype(np.uint8)
+    # img_gt = loader.dataset.map_to_rgb(gt_depth_[index][0])
     # img_gt = gt_depth_[index][0]  # [128, 256]
     # img_gt = loader.dataset.map_to_rgb(gt_depth_[index][0])
     # img_gt = loader.dataset.unmap_disparity(gt_depth_[index][0])
@@ -407,18 +407,26 @@ def save_visualization_depth(index, imgs, pred_depth_, gt_depth_, filename, load
     print('predcited image min value: ' + str(pred_target.min()))
     print('actual image max value: ' + str(img_gt.max()))
     print('actual image min value: ' + str(img_gt.min()))
+    pred_target = cv2.applyColorMap(pred_target, cv2.COLORMAP_VIRIDIS)
+    img_gt = cv2.applyColorMap(img_gt, cv2.COLORMAP_VIRIDIS)
 
-    fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
-    plt.figure(figsize=(10, 10))
-    axs1.imshow(img_input)
-    axs2.imshow(pred_target)
-    plt.title("Disparity prediction", fontsize=22)
-    axs2.axis('off')
-    axs3.imshow(img_gt)
-    plt.title("Disparity actual", fontsize=22)
-    fig.savefig(folder + '/images/{}.png'.format(filename + '_image_' + str(index)))
-    mlflow.log_artifact(folder + '/images/{}.png'.format(filename + '_image_' + str(index)))
-    plt.close(fig)
+    cv2.imwrite(folder + '/images/{}_epoch_{}_img.png'.format(filename, epoch), img_input)
+    cv2.imwrite(folder + '/images/{}_epoch_{}_pred.png'.format(filename, epoch), pred_target)
+    cv2.imwrite(folder + '/images/{}_epoch_{}_gt.png'.format(filename, epoch), img_gt)
+    mlflow.log_artifact(folder + '/images/{}_epoch_{}_img.png'.format(filename, epoch))
+    mlflow.log_artifact(folder + '/images/{}_epoch_{}_gt.png'.format(filename, epoch))
+    mlflow.log_artifact(folder + '/images/{}_epoch_{}_pred.png'.format(filename, epoch))
+    # fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
+    # plt.figure(figsize=(10, 10))
+    # axs1.imshow(img_input)
+    # axs2.imshow(pred_target)
+    # plt.title("Disparity prediction", fontsize=22)
+    # axs2.axis('off')
+    # axs3.imshow(img_gt)
+    # plt.title("Disparity actual", fontsize=22)
+    # fig.savefig(folder + '/images/{}.png'.format(filename + '_image_' + str(index)))
+    # mlflow.log_artifact(folder + '/images/{}.png'.format(filename + '_image_' + str(index)))
+    # plt.close(fig)
 
 def save_ckpt(path, model, optimizer, scheduler, metrics, best_score, epoch):
     """ save current model

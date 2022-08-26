@@ -308,6 +308,7 @@ class staticLoader(data.Dataset):
             # disparity = torch.from_numpy(self.map_disparity(depth_labels.float())).unsqueeze(0).float()
             disparity = self.map_disparity(depth_labels.float()).unsqueeze(0).float()
             depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+            # depth_normalized = depth_labels.float()
             img_path = "%s_%s_%06d_leftImg8bit" % (city, seq, frame_id)
             return image, label_target, depth_normalized, img_path
 
@@ -317,6 +318,7 @@ class staticLoader(data.Dataset):
         # print(depth_labels.shape)
         disparity = self.map_disparity(depth_labels.float()).unsqueeze(0).float()
         depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+        # depth_normalized = depth_labels.float()
         return image, label_target, depth_normalized
 
     def decode_segmap(self, temp):

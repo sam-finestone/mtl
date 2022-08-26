@@ -255,7 +255,7 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                     pred_depth_ = task_pred.data.cpu().numpy()
                     for i in range(inputs.size(0)):
                         filename = filepath[i]
-                        save_visualization_depth(i, imgs, pred_depth_, gt_depth_, filename, folder)
+                        save_visualization_depth(i, epoch, imgs, pred_depth_, gt_depth_, filename, folder)
 
             if task == 'depth_segmentation':
                 depth_pred, seg_pred = single_task_model(inputs)
@@ -349,23 +349,26 @@ def save_visualization_segmentation(index, epoch, imgs, seg_pred, gt_semantic_la
     mlflow.log_artifact(folder + '/images/{}_epoch_{}_gt.png'.format(filename, epoch))
     mlflow.log_artifact(folder + '/images/{}_epoch_{}_pred.png'.format(filename, epoch))
 
-def save_visualization_depth(index, imgs, pred_depth_, gt_depth_, filename, folder):
+def save_visualization_depth(index, epoch, imgs, pred_depth_, gt_depth_, filename, folder):
     img_input = np.transpose(imgs[index], (1, 2, 0))
     # pred_target = pred_depth_[index][0] / 255
     pred_target = pred_depth_[index][0].squeeze()
     # img_gt = gt_depth_[index][0] / 255
     img_gt = gt_depth_[index][0]
-    fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
-    plt.figure(figsize=(10, 10))
-    axs1.imshow(img_input)
-    axs2.imshow(pred_target)
-    plt.title("Disparity prediction", fontsize=22)
-    axs2.axis('off')
-    axs3.imshow(img_gt)
-    plt.title("Disparity actual", fontsize=22)
-    fig.savefig(folder + '/images/{}.png'.format(filename + '_image_' + str(index)))
-    mlflow.log_artifact(folder + '/images/{}.png'.format(filename + '_image_' + str(index)))
-    plt.close(fig)
+    cv2.imwrite(folder + '/images/{}_epoch_{}_img.png'.format(filename, epoch), img_gt)
+    cv2.imwrite(folder + '/images/{}_epoch_{}_pred.png'.format(filename, epoch), img_gt)
+    cv2.imwrite(folder + '/images/{}_epoch_{}_gt.png'.format(filename, epoch), pred_target)
+    # fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
+    # plt.figure(figsize=(10, 10))
+    # axs1.imshow(img_input)
+    # axs2.imshow(pred_target)
+    # plt.title("Disparity prediction", fontsize=22)
+    # axs2.axis('off')
+    # axs3.imshow(img_gt)
+    # plt.title("Disparity actual", fontsize=22)
+    # fig.savefig(folder + '/images/{}.png'.format(filename + '_image_' + str(index)))
+    # mlflow.log_artifact(folder + '/images/{}.png'.format(filename + '_image_' + str(index)))
+    # plt.close(fig)
 
 
 # stereo = cv2.StereoBM_create(numDisparities=16, blockSize=15)

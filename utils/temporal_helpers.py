@@ -69,6 +69,10 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
         # plt.imshow(tensor_image.permute(1, 2, 0))
         gt_depth = depth.to(device)
         # print(gt_depth.shape)
+        print(inputs.shape)
+        print(gt_semantic_labels.shape)
+        print(inputs[:, -1].shape)
+        print(gt_semantic_labels[:, -1].shape)
         if task == 'segmentation':
             task_pred = model(inputs)
             loss = criterion(task_pred, gt_semantic_labels)
@@ -228,6 +232,8 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
 
                 # Save visualizations of first batch
                 if batch_idx == 0 and save_val_imgs is not None:
+                    # get the images from the T dimension that have predicitons on them so last frame in T
+                    inputs = inputs[:, -1]
                     img_id = save_val_results_seg(inputs, gt_semantic_labels, task_pred, img_id, test_loader, folder)
 
             if task == 'depth':

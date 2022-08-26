@@ -292,7 +292,8 @@ class DepthDecoder(nn.Module):
             nn.Dropout(drop_out),
             nn.Conv2d(256, num_classes, kernel_size=1, stride=1),
         )
-        self.softplus = torch.nn.Softplus(beta=1, threshold=20)
+        # self.softplus = torch.nn.Softplus(beta=1, threshold=20)
+        self.sigmoid = torch.nn.Sigmoid()
         self._init_weight()
 
     def forward(self, x):
@@ -302,7 +303,8 @@ class DepthDecoder(nn.Module):
         # x = torch.cat((x, low_level_feat), dim=1)
         x = F.interpolate(x, size=(128, 256), mode="bilinear", align_corners=True)
         x = self.last_conv(x)
-        x = self.softplus(x)
+        # x = self.softplus(x)
+        x = self.sigmoid(x)
         return x
 
     def _init_weight(self):
@@ -349,14 +351,14 @@ class MultiDecoder(nn.Module):
 
 
 class SegDecoderTemporal(nn.Module):
-    def __init__(self, input_t_dim, num_classes, drop_out, BatchNorm):
+    def __init__(self, input_c_dim, num_classes, drop_out, BatchNorm):
         super(SegDecoderTemporal, self).__init__()
         # if backbone == "resnet" or backbone == "drn":
         #     low_level_inplanes = 256
-        self.input_t = input_t_dim
+        self.input_c_dim = input_c_dim
         self.num_classes = num_classes
-        mid_input_dim = 6
-        self.conv1 = nn.Conv3d(input_t_dim, mid_input_dim, 1, bias=False)
+        mid_input_dim = 128
+        self.conv1 = nn.Conv3d(input_c_dim, mid_input_dim,  kernel_size=(3, 1, 1), bias=False)
         self.bn1 = BatchNorm(mid_input_dim)
         self.relu = nn.ReLU()
         self.last_conv = nn.Sequential(
@@ -368,17 +370,22 @@ class SegDecoderTemporal(nn.Module):
             BatchNorm(mid_input_dim),
             nn.ReLU(),
             nn.Dropout(drop_out),
-            nn.Conv3d(mid_input_dim, 1, kernel_size=(1, 1, 1), stride=1),
+            nn.Conv3d(mid_input_dim, self.num_classes, kernel_size=(1, 1, 1), stride=1),
         )
         self._init_weight()
 
     def forward(self, x):
+        # permute the input tensor of dim [B, T, C, H, W] to [B, C, T, H, W]
+        x = x.permute(0, 2, 1, 3, 4)
+        # print('input ,x, before first conv layer in Segdecotemp')
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
         # x = torch.cat((x, low_level_feat), dim=1)
-        x = F.interpolate(x, size=(self.num_classes, 128, 256), mode="trilinear", align_corners=True)
+        # x = F.interpolate(x, size=(1,128, 256), mode="trilinear", align_corners=True)
+        x = F.interpolate(x, size=(128, 256), mode="bilinear", align_corners=True)
         x = self.last_conv(x)
+        # x = x.squeeze() # use if using trilinear interpolation
         return x
 
     def _init_weight(self):
