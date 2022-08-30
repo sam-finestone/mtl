@@ -1,5 +1,6 @@
-from .decoder import Decoder, MILADecoder, SegDecoder, DepthDecoder, MultiDecoder, SegDecoderTemporal
+from .decoder import SegDecoder, DepthDecoder, MultiDecoder, DecoderTemporal
 from .deeplabv3_encoder import DeepLabv3
 from .mtl_model import TemporalModel
 from .static_model import StaticTaskModel
 from .attention.attention import LocalContextAttentionBlock
+from .decoder import DropOutDecoder, FeatureDropDecoder, FeatureNoiseDecoder

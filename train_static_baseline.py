@@ -12,7 +12,7 @@ from loader.city_loader import staticLoader
 # from loader.video_dataset import *
 from utils.sort_dataset import *
 # from loader.nyuv2_dataloader import NYUV2
-from models.decoder import Decoder, SegDecoder, DepthDecoder, MultiDecoder
+from models.decoder import SegDecoder, DepthDecoder, MultiDecoder
 from models.mtl_model import TemporalModel
 from models.static_model import StaticTaskModel
 from models.deeplabv3_encoder import DeepLabv3
@@ -109,7 +109,7 @@ mlflow.set_experiment(experiment_name=NAME_EXPERIMENT)
 train_transform = et.ExtCompose([
             et.ExtResize((128, 256)),
             # et.ExtRandomCrop(size=(opts.crop_size, opts.crop_size)),
-            et.ExtColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
+            # et.ExtColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
             et.ExtRandomHorizontalFlip(),
             et.ExtToTensor(),
             et.ExtNormalize(mean=[0.485, 0.456, 0.406],
@@ -219,7 +219,7 @@ if torch.cuda.is_available():
 #   {'params': filter(lambda p: p.requires_grad, last_params)}],
 #   lr=0.00025, momentum=0.9, weight_decay=0.0001)
 # seg was 0.01
-model_opt = optim.Adam(model.parameters(), lr=0.0001)
+model_opt = optim.Adam(model.parameters(), lr=0.001)
 # scheduler = get_scheduler(model_opt, cfg['training']['lr_schedule'])
 # model_opt = torch.optim.SGD(params=model.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-4)
 # model_opt = optim.SGD(model.parameters(), lr=cfg['training']["optimizer"]["lr"], momentum=0.9, weight_decay=0.0001)
@@ -329,8 +329,8 @@ elif TASK == 'depth':
     # criterion = torch.nn.MSELoss()
     # criterion = torch.nn.L1Loss()
     # criterion = InverseDepthL1Loss()
-    criterion = InverseDepthL1Loss2()
-    # criterion = L1LossIgnoredRegion()
+    # criterion = InverseDepthL1Loss2()
+    criterion = L1LossIgnoredRegion()
 
 elif TASK == 'depth_segmentation':
     if not os.path.exists(os.path.join(SAMPLES_PATH, 'images')):
@@ -550,8 +550,8 @@ with mlflow.start_run():
         for key, value in metrics.items():
             # get the most recent metric
             mlflow.log_metric(key, value[-1])
-
-    # plot_learning_curves(metrics, EPOCHS, SAMPLES_PATH, TASK)
+    val_epochs = len(metrics['val_loss'])
+    plot_learning_curves(metrics, EPOCHS, val_epochs, SAMPLES_PATH, TASK)
     time_elapsed = time.time() - since
 
     # Since the model was logged as an artifact, it can be loaded to make predictions

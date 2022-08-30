@@ -7,9 +7,9 @@ model:
             resnet_fast: resnet18 # resnet50 or resnet18 or resnset101
     dropout: 0.5
     path_num: 2
-    window_size: 5
+    window_size: 3
     version: average_fusion
-    k: 4
+    k: 2
     frames_per_segment: 48
     tasks: segmentation # depth or segmentation
     task_classes: 19

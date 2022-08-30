@@ -201,11 +201,11 @@ class staticLoader(data.Dataset):
         self.ignore_index = 19
         self.depth_transform_train = transforms.Compose([
                                                     transforms.Resize((128, 256)),
-                                                    transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
+                                                    # transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
                                                     transforms.RandomHorizontalFlip()
                                                  ])
         self.depth_transform_val = transforms.Compose([
-                                                        transforms.Resize((128, 256)),
+                                                        transforms.Resize((128, 256))
                                                     ])
         # self.trans = transforms.Compose([
         #                                 ColorJitter(
@@ -213,8 +213,7 @@ class staticLoader(data.Dataset):
         #                                     contrast = 0.5,
         #                                     saturation = 0.5),
         #                                 HorizontalFlip(),
-        #                                 # RandomScale((0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)),
-        #                                 # RandomCrop(cfg.crop_size)
+        #
         #                                 ])
         self.class_map = dict(zip(self.valid_classes, range(19)))
 
@@ -240,7 +239,7 @@ class staticLoader(data.Dataset):
         # want to revrese this disparity = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
         disparity = (1 - (0)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
         disparity[disparity == -1] = 0
-        disparity[disparity > -1] = (disparity[disparity > -1] + 1) * (256 * 4)
+        disparity[disparity > -1] = (disparity[disparity > -1] + 1) * (128 * 4)
         # disparity = (1 - (0)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
         return disparity
 
@@ -293,9 +292,10 @@ class staticLoader(data.Dataset):
         # image = torch.from_numpy(image).permute(2, 0, 1).float()
 
         depth_path = os.path.join(self.depth_base, city, ("%s_%s_%06d_disparity.png" % (city, seq, frame_id)))
-        # depth_img = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
+        depth_img = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
+        depth_img = Image.fromarray(depth_img)
         # depth_img_tensor = torch.from_numpy(depth_img).float()
-        depth_img = Image.open(depth_path)
+        # depth_img = Image.open(depth_path)
         # depth_np = np.asarray(depth, dtype=np.uint8) # without dtype for display
 
         # disparity = torch.from_numpy(self.map_disparity(depth)).unsqueeze(0).float()
@@ -304,21 +304,30 @@ class staticLoader(data.Dataset):
         # print(depth_normalized.max()) - 1.0
         # print(depth_normalized.min()) - -1.0
         if self.split == 'val' or self.split == 'test':
-            _, depth_labels = self.transform(image_pil, depth_img)
+            # _, depth_labels = self.transform(image_pil, depth_img)
+            depth_labels = self.depth_transform_val(depth_img)
+            depth_labels = transforms.ToTensor()(depth_labels)
+            # depth_labels[depth_labels == 0] = -1
             # disparity = torch.from_numpy(self.map_disparity(depth_labels.float())).unsqueeze(0).float()
-            disparity = self.map_disparity(depth_labels.float()).unsqueeze(0).float()
-            depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+            depth_normalized = self.map_disparity(depth_labels.float()).unsqueeze(0).float()
+            # depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
             # depth_normalized = depth_labels.float()
             img_path = "%s_%s_%06d_leftImg8bit" % (city, seq, frame_id)
             return image, label_target, depth_normalized, img_path
 
         # depth_labels = self.depth_transform_train(depth_img_tensor)
-        _, depth_labels = self.transform(image_pil, depth_img)
+        depth_labels = self.depth_transform_train(depth_img)
+        depth_labels = transforms.ToTensor()(depth_labels)
+        # depth_labels = np.asarray(depth_labels, dtype="float32")
+        # _, depth_labels = self.transform(image_pil, depth_img)
         # disparity = torch.from_numpy(self.map_disparity(depth_labels.float())).unsqueeze(0).float()
         # print(depth_labels.shape)
-        disparity = self.map_disparity(depth_labels.float()).unsqueeze(0).float()
-        depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+        depth_normalized = self.map_disparity(depth_labels.float()).unsqueeze(0).float()
+        # depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
         # depth_normalized = depth_labels.float()
+        # print(depth_labels.shape)
+        # print(depth_labels.min())
+        # print(depth_labels.max())
         return image, label_target, depth_normalized
 
     def decode_segmap(self, temp):

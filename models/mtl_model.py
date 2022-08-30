@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from models.decoder import Decoder, MILADecoder, SegDecoder
 from models.encoder import resnet50
 # from mod import AblatedNet
 from models.resnet_encoder import ResNet50, ResNet18
@@ -12,186 +11,257 @@ from models.deeplabv3_encoder import DeepLabv3
 from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback, SynchronizedBatchNorm2d, SynchronizedBatchNorm3d
 import pdb
 from models.attention.attention import LocalContextAttentionBlock, GlobalContextAttentionBlock
-from models.decoder import Decoder, SegDecoder, DepthDecoder, MultiDecoder, SegDecoderTemporal
+from models.decoder import SegDecoder, DepthDecoder, MultiDecoder, DecoderTemporal
+from models.decoder import FeatureNoiseDecoder, FeatureDropDecoder, DropOutDecoder
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class TemporalModel(nn.Module):
-    ''' This class contains the implementation of the slowfast model.
-    https://github.com/r1c7/SlowFastNetworks/blob/master/lib/slowfastnet.py
+    ''' This class contains the implementation of the temporal slowfast setup (inspiration from original paper
+    https://github.com/r1c7/SlowFastNetworks/blob/master/lib/slowfastnet.py )
             Args:
-                enocder: A integer indicating the embedding size.
-                decoder: A integer indicating the size of output dimension.
-                number_frames: A integer indicating the hidden size of rnn.
+                encoder_slow: A integer indicating the embedding size.
+                decode_fastr: A integer indicating the size of output dimension.
+                task: which task is being done [segmentation, depth, depth_segmentation(multi-task)
+                class_tasks: (int) if single class setup or list (int) of classes of depth and segmentation
+                k: is the keyframe interval, and has to be greater than 1 and smaller than T (window_size)
+                window_interval: is the number of frames we are processing as the T dimensions
+                seg_drop_out: is the task decoder's dropout
+                version: of the fusion concatenation or 3d temporal decoder
+                semi-supervised: Adding semi supervision to the unlabelled data (segementation or depth) to the model
+                multi_task: (bool) indicating whether task is a single or multi-task setup
     '''
-    def __init__(self, encoder_slow, encoder_fast, task, class_tasks, seg_drop_out, k=2, version='basic', mulit_task=False):
+    def __init__(self,
+                 encoder_slow, encoder_fast,
+                 task, class_tasks, seg_drop_out,
+                 window_interval, k=2, version='basic',
+                 semi_sup=False,
+                 mulit_task=False):
         super().__init__()
         self.encoder_slow = encoder_slow
         self.encoder_fast = encoder_fast
         self.K = k
         self.version = version
         self.multi_task = mulit_task
-        if task == 'segmentation':
+        self.semi_sup = semi_sup
+        input_dim_decoder = 256
+        list_kf_indicies = [x for x in range(window_interval) if x % self.K == 0]
+        list_non_kf_indicies = list(set(range(window_interval)) - set(list_kf_indicies))
+        if version == 'average_fusion':
             input_dim_decoder = 256
-            if version == 'average_fusion':
-                input_dim_decoder = 256
-            elif version == 'advers':
-                input_dim_decoder = 5
-            elif version == 'convnet_fusion':
-                fusion_dim = 3
-                input_dim_decoder = 256
-                self.convnet_fusion_layer = nn.Conv3d(fusion_dim, 1, kernel_size=(1, 1, 1), stride=1)
-            elif version == 'local_atten_fusion':
-                input_dim_decoder = 256
-            elif version == 'global_atten_fusion':
-                input_dim_t = 256
-                input_dim_decoder = 512
-                output_dim = 256
-                self.global_attention_block = GlobalContextAttentionBlock(input_dim_t, output_dim, last_affine=True)
-            elif version == 'local_atten_fusion':
-                input_dim_t = 256
-                output_dim = 256
-                kernel_neighbourhood = 9
-                self.self.local_attention_block = LocalContextAttentionBlock(input_dim_t, output_dim,
-                                                                             kernel_neighbourhood, last_affine=True)
+        elif version == 'advers':
+            input_dim_decoder = 5
+        elif version == 'convnet_fusion':
+            # number of keyframes + last_fast + annotated_frame
+            if len(list_kf_indicies) > len(list_non_kf_indicies):
+                if len(list_kf_indicies) > 1:
+                    t_dim = len(list_kf_indicies) + 1
+                else:
+                    t_dim = 2
+            else:
+                if len(list_non_kf_indicies) > 1:
+                    t_dim = len(list_kf_indicies) + 2
+                else:
+                    t_dim = 2
+            input_dim_decoder = 256
+            self.with_se_block = True
+            self.se_layer = SE_Layer(input_dim_decoder, 2)
+            self.convnet_fusion_layer = nn.Conv3d(input_dim_decoder, 256, kernel_size=(t_dim, 1, 1), stride=1)
+        elif version == 'global_atten_fusion':
+            input_dim_t = 256
+            input_dim_decoder = 512
+            output_dim = 256
+            self.with_se_block = True
+            self.se_layer = SE_Layer(input_dim_decoder, 2)
+            self.global_attention_block = GlobalContextAttentionBlock(input_dim_t, output_dim, last_affine=True)
+        elif version == 'local_atten_fusion':
+            input_dim_t = 256
+            output_dim = 256
+            kernel_neighbourhood = 9
+            self.self.local_attention_block = LocalContextAttentionBlock(input_dim_t, output_dim,
+                                                                         kernel_neighbourhood, last_affine=True)
+        # Allocate the appropriate decoder for single task
+        if task == 'segmentation':
             self.task_decoder = SegDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
+            if self.semi_sup:
+                # instantiate the different pertubation decoders for the unlabelled data
+                if len(list_kf_indicies) > len(list_non_kf_indicies):
+                    if len(list_kf_indicies) > 1:
+                        unlabelled_num_frames = len(list_kf_indicies) + len(list_non_kf_indicies) - 1
+                    else:
+                        unlabelled_num_frames = len(list_non_kf_indicies)
+                else:
+                    if len(list_non_kf_indicies) > 1:
+                        unlabelled_num_frames = len(list_kf_indicies) + len(list_non_kf_indicies) - 1
+                    else:
+                        unlabelled_num_frames = len(list_kf_indicies)
+
+                input_dim_decoder = 256
+                input_dim = 256
+                feature_drop = FeatureDropDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d).to(device)
+                feature_noise = FeatureNoiseDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d, uniform_range=0.3)
+                drop_decoder = DropOutDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d, drop_rate=0.3, spatial_dropout=True).to(device)
+                self.aux_decoder = [drop_decoder, feature_noise, feature_drop]
+                self.convnet_fusion_layer2 = nn.Conv3d(input_dim_decoder, 256, kernel_size=(unlabelled_num_frames, 1, 1), stride=1)
+                self.se_layer_2 = SE_Layer(input_dim_decoder, 2)
+
             if version == 'conv3d_fusion':
                 input_dim_decoder = 256  # T dimension - but here its the number of keyframes + last fast frame
-                self.task_decoder = SegDecoderTemporal(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm3d)
+                self.task_decoder = DecoderTemporal(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm3d)
 
+        if task == 'depth':
+            self.task_decoder = DepthDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
+            if version == 'conv3d_fusion':
+                input_dim_decoder = 256  # T dimension - but here its the number of keyframes + last fast frame
+                self.task_decoder = DecoderTemporal(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm3d)
 
-        elif task == 'depth':
-            dec = DepthDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
-
+        # Set up the appropriate multi-task decoder for multi-task
         elif task == 'depth_segmentation':
-            dec = MultiDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
+            depth_class = class_tasks[0]
+            seg_class = class_tasks[1]
+            # self.task_decoder = MultiDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
+            self.task_decoder = [DepthDecoder(input_dim_decoder, depth_class, seg_drop_out, SynchronizedBatchNorm1d),
+                                 SegDecoder(input_dim_decoder, seg_class, seg_drop_out, SynchronizedBatchNorm1d)]
+
+            if version == 'conv3d_fusion':
+                input_dim_decoder = 256  # T dimension - but here its the number of keyframes + last fast frame
+                self.task_decoder = [DecoderTemporal(input_dim_decoder, depth_class, seg_drop_out, SynchronizedBatchNorm3d),
+                                     DecoderTemporal(input_dim_decoder, seg_class, seg_drop_out, SynchronizedBatchNorm3d)]
 
     def forward(self, input):
         # [b, t, c, h, w]
         # Get the keyframes and non-keyframes for slow/fast setting
-        # keyframes, non_keyframes, list_kf_indicies = self.get_keyframes(input)
-        print('input shape: ' +str(input.shape)) #- torch.Size([4, 5, 3, 128, 256])
-        # pdb.set_trace()
-        # keyframes, non_keyframes, kf_mask, nk_mask = self.keyframes(input)
+        print('input shape: ' + str(input.shape)) # - torch.Size([4, 5, 3, 128, 256])
         keyframes, non_keyframes, list_kf_indicies, list_non_kf_indicies = self.get_keyframes(input)
-        # print('keyframe inputs using masking technique, [image, 0, image, 0, image(annotated)]: ' + str(keyframes.shape))
-        # print('non-keyframe inputs using masking technique, [0, image, 0, image, 0]: ' + str(non_keyframes.shape))
-        # change the dimensions of the input tensor for the deeplabv3 encoder and obtain encoder features
         enc_slow_ftrs, batch_size, t_dim_slow = self.run_encoder(keyframes, self.encoder_slow)
         enc_fast_ftrs, _, t_dim_fast = self.run_encoder(non_keyframes, self.encoder_fast)
         output_slow = self.reshape_output(enc_slow_ftrs, batch_size, t_dim_slow)
         output_fast = self.reshape_output(enc_fast_ftrs, batch_size, t_dim_fast)
-        # print('Reshaped output from slow (b,t,c,w,h):' + str(output_slow.shape))
-        # print('Reshaped output from fast (b,t,c,w,h):' + str(output_fast.shape))
-        # print('enc_slow_ftrs: ' + str(output_slow.shape))
-        # print('enc_fast_ftrs[:,-1]: ' + str(torch.unsqueeze(output_fast[:, -1], dim=1).shape))
+
+        if self.version == 'global_atten_fusion':
+            task_predictions = self.global_attention_fusion(output_slow, output_fast, list_kf_indicies,
+                                                            list_non_kf_indicies, mulit_task=self.multi_task)
+        if self.version == 'local_atten_fusion':
+            task_predictions = self.local_attention_fusion(output_slow, output_fast, list_kf_indicies,
+                                                           list_non_kf_indicies, mulit_task=self.multi_task)
+
+        # last frame is a keyframe frame (slow encoded)
+        annotated_frame = {'last_frame': [], 'type': []}
+        if max(list_kf_indicies) > max(list_non_kf_indicies):
+            if len(list_kf_indicies) > 1:
+                annotated_frame['last_frame'].append(output_slow[:, -1].unsqueeze(1))
+                annotated_frame['type'].append('slow_frame')
+                output_slow = output_slow[:, :-1]
+            else:
+                annotated_frame['last_frame'].append(None)
+                annotated_frame['type'].append('slow_frame')
+        # last frame is a keyframe frame (fast encoded)
+        else:
+            if len(list_non_kf_indicies) > 1:
+                annotated_frame['last_frame'].append(output_fast[:, -1].unsqueeze(1))
+                annotated_frame['type'].append('fast_frame')
+                output_fast = output_fast[:, :-1]
+            else:
+                annotated_frame['last_frame'].append(None)
+                annotated_frame['type'].append('fast_frame')
+
         # Different ways of propagating temporal features
         if self.version == 'average_fusion':
-            task_predictions = self.average(output_slow, output_fast, mulit_task=self.multi_task)
+            task_predictions = self.average(output_slow, output_fast, annotated_frame, mulit_task=self.multi_task)
         elif self.version == 'advers':
+            # still in development
             task_predictions = self.adverserial_concatentation(input, mulit_task=self.multi_task)
         elif self.version == 'conv3d_fusion':
-            task_predictions = self.temporal_net(output_slow, output_fast, mulit_task=self.multi_task)
+            task_predictions = self.temporal_net(output_slow, output_fast, annotated_frame, mulit_task=self.multi_task)
         elif self.version == 'convnet_fusion':
-            task_predictions = self.convnet_fusion(output_slow, output_fast, with_se_block=False, mulit_task=self.multi_task)
-        elif self.version == 'global_atten_fusion':
-            task_predictions = self.global_attention_fusion(output_slow, output_fast, mulit_task=self.multi_task)
-        elif self.version == 'local_atten_fusion':
-            task_predictions = self.local_attention_fusion(output_slow, output_fast, mulit_task=self.multi_task)
+            task_predictions = self.convnet_fusion(output_slow, output_fast, annotated_frame, with_se_block=False, mulit_task=self.multi_task)
 
-        # Reshape the output tensors to a [B, T, C, H, W]
-        # output_seg_slow = self.reshape_output(seg_slow_pred, batch_size, t_dim_slow)
-        # output_seg_fast = self.reshape_output(seg_fast_pred, batch_size, t_dim_fast)
+        if self.semi_sup:
+            # get the predictions on the unlabbeled frames labels
+            unlabelled_frame_fusion = torch.cat([output_slow, output_fast], dim=1)
+            # print(unlabelled_frame_fusion.shape)
+            unlabelled_frame_fusion = unlabelled_frame_fusion.permute(0, 2, 1, 3, 4)
+            unlabelled_frame_fusion = self.convnet_fusion_layer2(unlabelled_frame_fusion)
+            unlabelled_frame_fusion = unlabelled_frame_fusion.permute(0, 1, 2, 3, 4).squeeze()
+            print(unlabelled_frame_fusion.shape)
+            if self.se_layer_2 is not None:
+                unlabelled_frame_fusion = self.se_layer_2(unlabelled_frame_fusion)
+            # unlabelled_pred will be a list of segmented outputs
+            unlabelled_preds = self.run_perturbed_decoders(unlabelled_frame_fusion)
+            return task_predictions, unlabelled_preds
 
-        # want to stake the predicted frames back in order of the T
-        # segmentation_pred = self.stack_predictions(output_seg_slow, output_seg_fast, list_kf_indicies)
-        # print('task_predictions at the end of mtl_model:' + str(task_predictions.shape))
         return task_predictions
 
-    def average(self, output_slow, output_fast, mulit_task=False):
-        # frame_batch_dim = output_slow.shape[0]
-        # print(frame_batch_dim)
-        # frames_t_dim = output_slow.shape[1]
-        # frame_2d_batch = frame_batch_dim * frames_t_dim
-        # kf_encoded_frames = torch.reshape(output_slow, (frame_2d_batch, output_slow.shape[2], output_slow.shape[3],
-        #                                                 output_slow.shape[4])).to('cuda:0')
+    def compose_fusion_tensor(self, annotated_frame, output_slow, output_fast):
+        x_fusion_input = torch.ones(output_slow.shape[0], output_slow.shape[1],
+                                    output_slow.shape[2], output_slow.shape[3],
+                                    output_slow.shape[4])
+        if annotated_frame['type'][0] == 'slow_frame':
+            if annotated_frame['last_frame'][0] is not None:
+                x_fusion_input = torch.cat([output_slow, output_fast, annotated_frame['last_frame'][0]], dim=1)
+            else:
+                x_fusion_input = torch.cat([output_slow, output_fast[:, -1].unsqueeze(1)], dim=1)
+        if annotated_frame['type'][0] == 'fast_frame':
+            if annotated_frame['last_frame'][0] is not None:
+                x_fusion_input = torch.cat([output_slow, output_fast, annotated_frame['last_frame'][0]], dim=1)
+            else:
+                x_fusion_input = torch.cat([output_slow, output_fast], dim=1)
+        return x_fusion_input
 
-        # fast_frame = output_fast[:, -1].tile((2, 1, 1, 1)).to('cuda:0')  # is there a better way of doing this?
-        # print(kf_encoded_frames.shape)# - torch.Size([8, 256, 8, 16])
-        # print(fast_frame.shape) #- torch.Size([8, 256, 8, 16])
-        # output_fast_unsqueezed = torch.unsqueeze(output_fast[:, -1], dim=1)
-        # print('kf_encoded_frames: ' + str(kf_encoded_frames.shape))
-        # print('fast_frame: ' + str(fast_frame.shape))
-        # x_fusion = torch.cat([kf_encoded_frames, fast_frame], dim=1).to('cuda:0')
-        output_slow = output_slow.to('cuda:0')
-        fast_frame = output_fast[:, -1].unsqueeze(1).to('cuda:0')
-        x_fusion = torch.cat([output_slow, fast_frame], dim=1).to('cuda:0')
-        x_fusion = torch.mean(x_fusion, dim=1).squeeze(1)
+    def average(self, output_slow, output_fast, annotated_frame, mulit_task=False):
+        # output_slow = output_slow
+        # fast_frame = output_fast[:, -1].unsqueeze(1)
+        # x_fusion = torch.cat([output_slow, fast_frame], dim=1)
+        x_fusion_input = self.compose_fusion_tensor(annotated_frame, output_slow, output_fast)
+        x_fusion = torch.mean(x_fusion_input, dim=1).squeeze(1)
         if not mulit_task:
             #  depth decoder or segmentation decoder
             task_predictions = self.task_decoder(x_fusion)
         else:
             task_predictions = []
             for task_decoder in self.list_decoders:
-                # Reshape the output tensors to a [B, T, C, H, W]
-                # output_slow = self.reshape_output(task_decoder(enc_slow_ftrs), batch_size, t_dim_slow)
-                # output_fast = self.reshape_output(task_decoder(enc_combined_ftrs), batch_size, t_dim_fast)
                 task_predictions.append(task_decoder(x_fusion))
         return task_predictions
 
-    def adverserial_concatentation(self, input, mulit_task=False):
-        keyframes, non_keyframes, list_kf_indicies, list_non_kf_indicies = self.get_keyframes(input)
-        # print(input.shape) - torch.Size([4, 5, 3, 128, 256])
-        x_slow_all, batch_size, t_dim_slow = self.run_encoder(input, self.encoder_slow)
-        x_fast_all, _, t_dim_fast = self.run_encoder(input, self.encoder_fast)
-        # print(x_fast_all.shape) - torch.Size([10, 256, 8, 16])
-        # print(x_slow_all.shape) - torch.Size([10, 2, 8, 16])
-        # apply masks to x_slow_all and x_fast_all and put representations into correct keyframe and frames
-        # only take the last frame before segmentation + the first keyframe
-        # print(x_slow_all[:, list_kf_indicies].shape)
-        # print(x_fast_all[:, list_non_kf_indicies][-1].shape)
-        fast_last_frame = x_fast_all[:, list_non_kf_indicies][-1].tile((x_slow_all[:, list_kf_indicies].shape[0], 1, 1, 1))
-        x_fused = torch.cat([x_slow_all[:, list_kf_indicies], fast_last_frame], dim=1).to('cuda:0')
-        if not mulit_task:
-            task_decoder = self.list_decoders[-1]
-            task_predictions = task_decoder(x_fused)
-        # x_fusion = self.fusion_network(x_fused)
-        # y = self.decoder(x_fusion)
-        # return y, x_slow_all, x_fast_all
-        # output_fast_unsqueezed = torch.unsqueeze(output_fast[:, -1], dim=1)
-        return task_predictions
-
-    def temporal_net(self, output_slow, output_fast, mulit_task=False):
+    def temporal_net(self, output_slow, output_fast, annotated_frame, mulit_task=False):
         # take the slow output of the keyframes and the last frame of the fast
-        # output_slow = output_slow.to('cuda:0')
-        # fast_frame = output_fast[:, -1].unsqueeze(1).to('cuda:0')
-        fast_frame = output_fast[:, -1].unsqueeze(1)
+        #  fast_frame = output_fast[:, -1].unsqueeze(1)
         # x_fusion = torch.cat([output_slow, fast_frame], dim=1).to('cuda:0')
-        x_fusion = torch.cat([output_slow, fast_frame], dim=1)
+        x_fusion_input = self.compose_fusion_tensor(annotated_frame, output_slow, output_fast)
+        # x_fusion = torch.cat([output_slow, fast_frame], dim=1)
         if not mulit_task:
             #  depth decoder or segmentation decoder
             # task_decoder = self.list_decoders[-1]
-            task_predictions = self.task_decoder(x_fusion)
-            # task_predictions = task_predictions.squeeze(1)
+            task_predictions = self.task_decoder(x_fusion_input)
+            task_predictions = task_predictions.squeeze(1)
         else:
             task_predictions = []
             for task_decoder in self.list_decoders:
-                task_pred = task_decoder(x_fusion)
+                task_pred = task_decoder(x_fusion_input)
                 task_pred = task_pred.squeeze(1)
                 task_predictions.append(task_pred)
         return task_predictions
 
-    def convnet_fusion(self, output_slow, output_fast, with_se_block=False, mulit_task=False):
+    def convnet_fusion(self, output_slow, output_fast, annotated_frame, with_se_block=False, mulit_task=False):
         # take the slow output of the keyframes and the last frame of the fast
-        output_slow = output_slow
-        fast_frame = output_fast[:, -1].unsqueeze(1)
-        x_fusion = torch.cat([output_slow, fast_frame], dim=1)
-        x_fusion = self.convnet_fusion_layer(x_fusion).squeeze()
 
+        if annotated_frame['type'][0] == 'slow_frame':
+            if annotated_frame['last_frame'][0] is not None:
+                x_fusion = torch.cat([output_slow, output_fast, annotated_frame['last_frame'][0]], dim=1)
+            else:
+                x_fusion = torch.cat([output_slow, output_fast[:, -1].unsqueeze(1)], dim=1)
+        if annotated_frame['type'][0] == 'fast_frame':
+            if annotated_frame['last_frame'][0] is not None:
+                x_fusion = torch.cat([output_slow, output_fast, annotated_frame['last_frame'][0]], dim=1)
+            else:
+                x_fusion = torch.cat([output_slow, output_fast], dim=1)
+
+        x_fusion = x_fusion.permute(0, 2, 1, 3, 4)
+        x_fusion = self.convnet_fusion_layer(x_fusion)
+        x_fusion = x_fusion.permute(0, 1, 2, 3, 4).squeeze()
         if with_se_block:
             x_fusion = x_fusion.unsqueeze(1)
-            se_block = ChannelSELayer3D(x_fusion.shape[1], 2)
-            x_fusion = se_block(x_fusion)
+            x_fusion = self.se_layer(x_fusion)
 
         if not mulit_task:
             #  depth decoder or segmentation decoder
@@ -206,36 +276,43 @@ class TemporalModel(nn.Module):
                 task_predictions.append(task_pred)
         return task_predictions
 
-    def global_attention_fusion(self, output_slow, output_fast, mulit_task=False):
+    def global_attention_fusion(self, output_slow, output_fast, list_kf_indicies, list_non_kf_indicies, mulit_task=False):
         # take the slow output of the keyframes and the last frame of the fast
         # for loop over the output slow tensor, doing a query to the annotated frame then
         attention_fusion = []
-        # output_slow needs to be more than size 2 - [kf, lastframe]
-        annotated_frame = output_slow[:, -1]
-        # print(annotated_frame.shape) - [2, 256, 8, 16]
-        # print(output_slow.shape[1]) - 2
-        # print(output_slow[:,0].shape) - [2, 256, 8, 16]
-        for i in range(0, output_slow.shape[1] - 1):
-            # query and final frame
-            output = self.global_attention_block(output_slow[:, i], annotated_frame)
-            attention_fusion.append(output)
+        if max(list_kf_indicies) > max(list_non_kf_indicies):
+            if len(list_kf_indicies) > 1:
+                annotated_frame = output_slow[:, -1]  # [2, 256, 8, 16]
+                output_slow = output_slow[:, :-1]
+                attention_fusion = [self.global_attention_block(output_slow[:, i], annotated_frame)
+                                    for i in range(output_slow.shape[1])]
+                attention_fusion.append(self.global_attention_block(output_fast[:, -1], annotated_frame))
+            else:
+                # last frame is the only keyframe
+                attention_fusion = [self.global_attention_block(output_fast[:, -1], output_slow[:, -1])]
+        else:
+            if len(list_non_kf_indicies) > 1:
+                annotated_frame = output_fast[:, -1]
+                output_fast = output_fast[:, :-1]
+                attention_fusion = [self.global_attention_block(output_slow[:, i], annotated_frame)
+                                    for i in range(output_slow.shape[1])]
+                attention_fusion.append(self.global_attention_block(output_fast[:, -1], annotated_frame))
+            else:
+                # last frame is a fast_frame and there is no other fast frames, could be many keyframes
+                attention_fusion = [self.global_attention_block(output_slow[:, i], output_fast[:, -1])
+                                    for i in range(output_slow.shape[1])]
 
-        # get last fast frame to query annotated frame
-        fast_frame_attn = self.global_attention_block(output_fast[:, -1], annotated_frame)
-        # print(fast_frame_attn.shape)
-        attention_fusion.append(fast_frame_attn)
         # stack the outputs of the global attention tensors
-        # attn_fusion_tensor = torch.stack(attention_fusion)
-        attn_fusion_tensor = torch.cat([x for x in attention_fusion], dim=1)
-        print(attn_fusion_tensor.shape) # - [2, 2, 256, 8, 16]
+        attn_fusion_tensor = torch.cat([x for x in attention_fusion], dim=1) # [4, 512, 8, 16]
+        # print('before se layer')
+        # print(attn_fusion_tensor.shape)
         # print(fast_frame.shape) - [4, 256, 8, 16]
         # print(kf_encoded_frames.shape) - [4, 256, 8, 16]
-
-        # if with_se_block:
-        #     x_fusion = x_fusion.unsqueeze(1)
-        #     se_block = ChannelSELayer3D(x_fusion.shape[1], 2).to('cuda:0')
-        #     x_fusion = se_block(x_fusion)
-
+        if self.with_se_block:
+            # x_fusion = attn_fusion_tensor.unsqueeze(1)
+            attn_fusion_tensor = self.se_layer(attn_fusion_tensor)
+        # print('after se layer')
+        # print(attn_fusion_tensor.shape)
         if not mulit_task:
             #  depth decoder or segmentation decoder
             # task_decoder = self.list_decoders[-1]
@@ -257,12 +334,12 @@ class TemporalModel(nn.Module):
         frames_t_dim = output_slow.shape[1]
         frame_2d_batch = frame_batch_dim * frames_t_dim
         kf_encoded_frames = torch.reshape(output_slow, (frame_2d_batch, output_slow.shape[2], output_slow.shape[3],
-                                                        output_slow.shape[4])).to('cuda:0')
+                                                        output_slow.shape[4]))
         # print(kf_encoded_frames.shape)
         fast_frame = output_fast[:, -1]
         # print(fast_frame.shape)
         # fast_frame = fast_frame.tile((2,)).to('cuda:0')
-        fast_frame = fast_frame.repeat(2, 1, 1, 1).to('cuda:0')
+        fast_frame = fast_frame.repeat(2, 1, 1, 1)
         # print(fast_frame.shape) - [4, 256, 8, 16]
         # print(kf_encoded_frames.shape) - [4, 256, 8, 16]
         # x_fusion = torch.cat([output_slow, fast_frame], dim=1).to('cuda:0')
@@ -290,6 +367,40 @@ class TemporalModel(nn.Module):
                 task_predictions.append(task_pred)
         return task_predictions
 
+    def run_perturbed_decoders(self, unlabeled_frames):
+        # task predictions for each set or unlabelled frames
+        task_predictions = []
+        for decoder in self.aux_decoder:
+            # send the unlabelled frames through each perturbed decoders to create 3 sets of
+            output = decoder(unlabeled_frames)
+            task_predictions.append(output)
+        return task_predictions
+
+        # run  [aux_decoder(x_ul, output_ul.detach()) for aux_decoder in self.aux_decoders]
+
+
+
+    def adverserial_concatentation(self, input, mulit_task=False):
+        keyframes, non_keyframes, list_kf_indicies, list_non_kf_indicies = self.get_keyframes(input)
+        # print(input.shape) - torch.Size([4, 5, 3, 128, 256])
+        x_slow_all, batch_size, t_dim_slow = self.run_encoder(input, self.encoder_slow)
+        x_fast_all, _, t_dim_fast = self.run_encoder(input, self.encoder_fast)
+        # print(x_fast_all.shape) - torch.Size([10, 256, 8, 16])
+        # print(x_slow_all.shape) - torch.Size([10, 2, 8, 16])
+        # apply masks to x_slow_all and x_fast_all and put representations into correct keyframe and frames
+        # only take the last frame before segmentation + the first keyframe
+        # print(x_slow_all[:, list_kf_indicies].shape)
+        # print(x_fast_all[:, list_non_kf_indicies][-1].shape)
+        fast_last_frame = x_fast_all[:, list_non_kf_indicies][-1].tile((x_slow_all[:, list_kf_indicies].shape[0], 1, 1, 1))
+        x_fused = torch.cat([x_slow_all[:, list_kf_indicies], fast_last_frame], dim=1)
+        if not mulit_task:
+            task_decoder = self.list_decoders[-1]
+            task_predictions = task_decoder(x_fused)
+        # x_fusion = self.fusion_network(x_fused)
+        # y = self.decoder(x_fusion)
+        # return y, x_slow_all, x_fast_all
+        # output_fast_unsqueezed = torch.unsqueeze(output_fast[:, -1], dim=1)
+        return task_predictions
 
     def get_keyframes(self, input):
         # input size dimension - [B, T, C, H, W]

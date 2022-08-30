@@ -314,32 +314,33 @@ Plot learning curves
 """
 
 
-def plot_learning_curves(metrics, epochs, save_img_path, task):
-    x = np.arange(epochs)
+def plot_learning_curves(metrics, epochs, val_epochs, save_img_path, task, ):
+    x_train = np.arange(epochs)
+    x_val = np.arange(val_epochs)
     fig, ax1 = plt.subplots()
     ax1.set_xlabel('epochs')
     ax1.set_ylabel('loss')
     if task == 'segmentation':
-        ln1 = ax1.plot(x, metrics['train_loss'], color='tab:red')
-        ln2 = ax1.plot(x, metrics['val_loss'], color='tab:red', linestyle='dashed')
+        ln1 = ax1.plot(x_train, metrics['train_loss'], color='tab:red')
+        ln2 = ax1.plot(x_val, metrics['val_loss'], color='tab:red', linestyle='dashed')
         ax1.grid()
         ax2 = ax1.twinx()
         ax2.set_ylabel('accuracy')
-        ln3 = ax2.plot(x, metrics['train_acc'], color='tab:blue')
-        ln4 = ax2.plot(x, metrics['val_acc'], color='tab:blue', linestyle='dashed')
-        ln5 = ax2.plot(x, metrics['val_miou'], color='tab:green')
+        ln3 = ax2.plot(x_train, metrics['train_acc'], color='tab:blue')
+        ln4 = ax2.plot(x_val, metrics['val_acc'], color='tab:blue', linestyle='dashed')
+        ln5 = ax2.plot(x_val, metrics['val_miou'], color='tab:green')
         lns = ln1 + ln2 + ln3 + ln4 + ln5
         plt.legend(lns, ['Train loss', 'Validation loss', 'Train accuracy', 'Validation accuracy', 'Val mIoU'])
         plt.tight_layout()
         plt.savefig(save_img_path + '/learning_curve.png', bbox_inches='tight')
     elif task == 'depth':
-        ln1 = ax1.plot(x, metrics['train_loss'], color='tab:red')
-        ln2 = ax1.plot(x, metrics['val_loss'], color='tab:red', linestyle='dashed')
+        ln1 = ax1.plot(x_train, metrics['train_loss'], color='tab:red')
+        ln2 = ax1.plot(x_val, metrics['val_loss'], color='tab:red', linestyle='dashed')
         ax1.grid()
         ax2 = ax1.twinx()
         ax2.set_ylabel('Abs. Error')
-        ln3 = ax2.plot(x, metrics['train_abs_error'], color='tab:blue')
-        ln4 = ax2.plot(x, metrics['val_abs_error'], color='tab:blue', linestyle='dashed')
+        ln3 = ax2.plot(x_train, metrics['train_abs_error'], color='tab:blue')
+        ln4 = ax2.plot(x_val, metrics['val_abs_error'], color='tab:blue', linestyle='dashed')
         lns = ln1 + ln2 + ln3 + ln4
         plt.legend(lns, ['Train loss', 'Validation loss', 'Train Absolute Error', 'Validation Absolute Error'])
         plt.tight_layout()
@@ -347,23 +348,23 @@ def plot_learning_curves(metrics, epochs, save_img_path, task):
 
     elif task == 'depth_segmentation':
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-        ax1.plot(x, metrics['train_loss'], color='tab:blue')
-        ax1.plot(x, metrics['val_loss'], color='tab:red')
+        ax1.plot(x_train, metrics['train_loss'], color='tab:blue')
+        ax1.plot(x_val, metrics['val_loss'], color='tab:red')
         ax1.set_xlabel('Epochs')
         ax1.set_ylabel('Loss')
         ax1.grid()
         # ax2 = ax1.twinx()
 
-        ax2.plot(x, metrics['train_abs_error'], color='tab:blue')
-        ax2.plot(x, metrics['val_abs_error'], color='tab:red')
+        ax2.plot(x_train, metrics['train_abs_error'], color='tab:blue')
+        ax2.plot(x_val, metrics['val_abs_error'], color='tab:red')
         ax2.set_xlabel('Epochs')
         ax2.set_ylabel('Error')
         ax2.grid()
 
-        ax3.plot(x, metrics['train_acc'], color='tab:blue')
-        ax3.plot(x, metrics['val_acc'], color='tab:blue', linestyle='dashed')
-        ax3.plot(x, metrics['train_miou'], color='tab:red')
-        ax3.plot(x, metrics['val_miou'], color='tab:red', linestyle='dashed')
+        ax3.plot(x_train, metrics['train_acc'], color='tab:blue')
+        ax3.plot(x_val, metrics['val_acc'], color='tab:blue', linestyle='dashed')
+        ax3.plot(x_train, metrics['train_miou'], color='tab:red')
+        ax3.plot(x_val, metrics['val_miou'], color='tab:red', linestyle='dashed')
         ax3.set_xlabel('Epochs')
         ax3.set_ylabel('Accuracy/mIou')
         ax3.grid()

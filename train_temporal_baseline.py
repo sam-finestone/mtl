@@ -13,7 +13,7 @@ from loader.temporal_loader import temporalLoader
 # from loader.video_dataset import *
 from utils.sort_dataset import *
 # from loader.nyuv2_dataloader import NYUV2
-from models.decoder import Decoder, SegDecoder, DepthDecoder, MultiDecoder, SegDecoderTemporal
+from models.decoder import SegDecoder, DepthDecoder, MultiDecoder, DecoderTemporal
 from models.mtl_model import TemporalModel
 from models.static_model import StaticTaskModel
 from models.deeplabv3_encoder import DeepLabv3
@@ -23,7 +23,7 @@ from utils.temporal_helpers import static_single_task_trainer, static_test_singl
 
 from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback, SynchronizedBatchNorm3d
 from utils.metrics import plot_learning_curves
-from loss.loss import InverseDepthL1Loss, L1LossIgnoredRegion
+from loss.loss import InverseDepthL1Loss, L1LossIgnoredRegion, consistency_weight
 from scheduler import get_scheduler
 # from deeplabv3plus import Deeplab_v3plus
 import deeplab
@@ -184,24 +184,44 @@ drop_out = cfg["model"]["dropout"]
 version = cfg["model"]["version"]
 
 # version = 'advers'
-version = 'convnet_fusion'
+# version = 'convnet_fusion'
 # version = 'global_atten_fusion'
 # version = 'conv3d_fusion'
-# version = 'average_fusion'
+version = 'average_fusion'
+unsup_= False
+semi_sup_ = True
+
+# if we are to add semi-supervision on the unlabelled frames
+if semi_sup_:
+    ram_up = 0.1
+    unsupervised_w = 30
+    rampup_ends = int(ram_up * EPOCHS)
+    cons_w_unsup = consistency_weight(final_w=unsupervised_w, iters_per_epoch=len(train_dataloader),
+                                      rampup_ends=rampup_ends)
+    semisup_loss = {'Mode': True, 'Function': cons_w_unsup}
+else:
+    semisup_loss = {'Mode': False, 'Function': None}
+
+if unsup_:
+    unsup_loss = {'Mode': True, 'Function': torch.nn.L1Loss()}
+else:
+    unsup_loss = {'Mode': False, 'Function': None}
+
 
 # initialise multi (or single) - task model
-model = TemporalModel(encoder_slow, encoder_fast, TASK, CLASS_TASKS, drop_out, k, version=version, mulit_task=False).to(device)
+model = TemporalModel(encoder_slow, encoder_fast, TASK, CLASS_TASKS, drop_out,
+                      window_size, k, semisup_loss, unsup_loss, version=version, mulit_task=False).to(device)
 # model = model.to(device)
 # Push model to GPU
 if torch.cuda.is_available():
     model = torch.nn.DataParallel(model).to(device)
     print('Model pushed to {} GPU(s), type {}.'.format(torch.cuda.device_count(), torch.cuda.get_device_name(0)))
 
-
-model_opt = optim.Adam(model.parameters(), lr=cfg["training"]["optimizer"]["lr0"])
+model_opt = optim.Adam(model.parameters(), lr=0.01)
+# model_opt = optim.Adam(model.parameters(), lr=cfg["training"]["optimizer"]["lr0"])
 scheduler = optim.lr_scheduler.StepLR(model_opt,
-                                      step_size=cfg["training"]["scheduler"]["step"],
-                                      gamma=cfg["training"]["scheduler"]["gamma"])
+                                      step_size=1000,
+                                      gamma=0.1)
 
 # directory name to save the models
 MODEL_SAVE_PATH = os.path.join(args.model_save_path, 'Model', 'Checkpoints', 'Temporal', version, TASK)
@@ -347,8 +367,9 @@ with mlflow.start_run():
 
         print('--- Training ---')
         if TASK == 'segmentation':
-            train_loss, train_acc, train_miou = static_single_task_trainer(epoch, criterion, train_dataloader, model,
-                                                                           model_opt, scheduler, TASK, LOG_FILE)
+            train_loss, train_acc, train_miou = static_single_task_trainer(epoch, criterion, semisup_loss,
+                                                                           unsup_loss, train_dataloader, model, model_opt,
+                                                                           scheduler, TASK, LOG_FILE)
             metrics['train_loss'].append(train_loss)
             metrics['train_acc'].append(train_acc)
             metrics['train_miou'].append(train_miou)

@@ -116,9 +116,9 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             # task_pred = model(inputs)
             # print(depth_pred.shape)
             # break
-            seg_loss = criterion[1](seg_pred, gt_semantic_labels)
-            depth_loss = criterion[0](depth_pred, gt_depth)
 
+            depth_loss = criterion[0](depth_pred, gt_depth)
+            seg_loss = criterion[1](seg_pred, gt_semantic_labels)
             # Equal Weighted losses
             depth_weight = 0.5
             seg_weight = 0.5
@@ -354,9 +354,9 @@ def save_val_results_seg(images, gt_semantic_labels, task_pred, img_id, loader, 
         target = loader.dataset.decode_target(target).astype(np.uint8)
         pred = loader.dataset.decode_target(pred).astype(np.uint8)
 
-        Image.fromarray(image).save(os.path.join(img_save_path, '%d_image.png' % img_id))
-        Image.fromarray(target).save(os.path.join(img_save_path, '%d_target.png' % img_id))
-        Image.fromarray(pred).save(os.path.join(img_save_path, '%d_pred.png' % img_id))
+        Image.fromarray(image).save(os.path.join(img_save_path, '%d_image_seg.png' % img_id))
+        Image.fromarray(target).save(os.path.join(img_save_path, '%d_target_seg.png' % img_id))
+        Image.fromarray(pred).save(os.path.join(img_save_path, '%d_pred_seg.png' % img_id))
 
         fig = plt.figure()
         plt.imshow(image)
@@ -376,15 +376,15 @@ def save_visualization_segmentation(index, epoch, imgs, seg_pred, gt_semantic_la
     img_input = (denorm(imgs[index]) * 255).transpose(1, 2, 0).astype(np.uint8)
     gt_id_format = gt_semantic_labels[index, :, :].squeeze()
     gt_color_format = vislbl(gt_id_format, maskColors)
-    cv2.imwrite(folder + '/images/{}_epoch_{}_img.png'.format(filename, epoch), img_input)
-    cv2.imwrite(folder + '/images/{}_epoch_{}_gt.png'.format(filename, epoch), gt_color_format)
+    cv2.imwrite(folder + '/images/{}_epoch_{}_img_seg.png'.format(filename, epoch), img_input)
+    cv2.imwrite(folder + '/images/{}_epoch_{}_gt_seg.png'.format(filename, epoch), gt_color_format)
     # Save predictions
     task_pred_id_format = seg_pred[index, :, :]
     pred_color_format = vislbl(task_pred_id_format, maskColors)
-    cv2.imwrite(folder + '/images/{}_epoch_{}_pred.png'.format(filename, epoch), pred_color_format)
-    mlflow.log_artifact(folder + '/images/{}_epoch_{}_img.png'.format(filename, epoch))
-    mlflow.log_artifact(folder + '/images/{}_epoch_{}_gt.png'.format(filename, epoch))
-    mlflow.log_artifact(folder + '/images/{}_epoch_{}_pred.png'.format(filename, epoch))
+    cv2.imwrite(folder + '/images/{}_epoch_{}_pred_seg.png'.format(filename, epoch), pred_color_format)
+    mlflow.log_artifact(folder + '/images/{}_epoch_{}_img_seg.png'.format(filename, epoch))
+    mlflow.log_artifact(folder + '/images/{}_epoch_{}_gt_seg.png'.format(filename, epoch))
+    mlflow.log_artifact(folder + '/images/{}_epoch_{}_pred_seg.png'.format(filename, epoch))
 
 def save_visualization_depth(index, epoch, imgs, pred_depth_, gt_depth_, filename, loader, folder):
     denorm = Denormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -393,29 +393,37 @@ def save_visualization_depth(index, epoch, imgs, pred_depth_, gt_depth_, filenam
     # pred_target = pred_depth_[index][0] / 255
     # pred_target = loader.dataset.unmap_disparity(pred_depth_[index][0])
     pred_target = pred_depth_[index][0]  # [128, 256]
-    pred_target = cv2.normalize(pred_target, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-    pred_target = pred_target.astype(np.uint8)
+    # pred_target = cv2.normalize(pred_target, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    # pred_target = pred_target.astype(np.uint8)
     # pred_target = loader.dataset.map_to_rgb(pred_depth_[index][0])
     img_gt = gt_depth_[index][0]
-    img_gt = cv2.normalize(img_gt, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-    img_gt = img_gt.astype(np.uint8)
+    # img_gt = cv2.normalize(img_gt, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    # img_gt = img_gt.astype(np.uint8)
     # img_gt = loader.dataset.map_to_rgb(gt_depth_[index][0])
     # img_gt = gt_depth_[index][0]  # [128, 256]
     # img_gt = loader.dataset.map_to_rgb(gt_depth_[index][0])
     # img_gt = loader.dataset.unmap_disparity(gt_depth_[index][0])
-    print('predcited image max value: ' + str(pred_target.max()))
-    print('predcited image min value: ' + str(pred_target.min()))
-    print('actual image max value: ' + str(img_gt.max()))
-    print('actual image min value: ' + str(img_gt.min()))
-    pred_target = cv2.applyColorMap(pred_target, cv2.COLORMAP_VIRIDIS)
-    img_gt = cv2.applyColorMap(img_gt, cv2.COLORMAP_VIRIDIS)
-
-    cv2.imwrite(folder + '/images/{}_epoch_{}_img.png'.format(filename, epoch), img_input)
-    cv2.imwrite(folder + '/images/{}_epoch_{}_pred.png'.format(filename, epoch), pred_target)
-    cv2.imwrite(folder + '/images/{}_epoch_{}_gt.png'.format(filename, epoch), img_gt)
-    mlflow.log_artifact(folder + '/images/{}_epoch_{}_img.png'.format(filename, epoch))
-    mlflow.log_artifact(folder + '/images/{}_epoch_{}_gt.png'.format(filename, epoch))
-    mlflow.log_artifact(folder + '/images/{}_epoch_{}_pred.png'.format(filename, epoch))
+    # print('predcited image max value: ' + str(pred_target.max()))
+    # print('predcited image min value: ' + str(pred_target.min()))
+    # print('actual image max value: ' + str(img_gt.max()))
+    # print('actual image min value: ' + str(img_gt.min()))
+    plt.imshow(img_gt)
+    plt.savefig(folder + '/images/{}_epoch_{}_gt_depth.png'.format(filename, epoch))
+    plt.close()
+    plt.imshow(pred_target)
+    plt.savefig(folder + '/images/{}_epoch_{}_pred_depth.png'.format(filename, epoch))
+    plt.close()
+    plt.imshow(img_input)
+    plt.savefig(folder + '/images/{}_epoch_{}_img_depth.png'.format(filename, epoch))
+    plt.close()
+    # pred_target = cv2.applyColorMap(pred_target, cv2.COLORMAP_VIRIDIS)
+    # img_gt = cv2.applyColorMap(img_gt, cv2.COLORMAP_VIRIDIS)
+    # cv2.imwrite(folder + '/images/{}_epoch_{}_img_depth.png'.format(filename, epoch), img_input)
+    # cv2.imwrite(folder + '/images/{}_epoch_{}_pred_depth.png'.format(filename, epoch), pred_target)
+    # cv2.imwrite(folder + '/images/{}_epoch_{}_gt_depth.png'.format(filename, epoch), img_gt)
+    # mlflow.log_artifact(folder + '/images/{}_epoch_{}_img_depth.png'.format(filename, epoch))
+    # mlflow.log_artifact(folder + '/images/{}_epoch_{}_gt_depth.png'.format(filename, epoch))
+    # mlflow.log_artifact(folder + '/images/{}_epoch_{}_pred_depth.png'.format(filename, epoch))
     # fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
     # plt.figure(figsize=(10, 10))
     # axs1.imshow(img_input)

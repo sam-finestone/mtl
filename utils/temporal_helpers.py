@@ -58,6 +58,7 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
     # initialise the loss the function
     # metric_calculator = SegmentationMetrics(average=True, ignore_background=True)
     end = time.time()
+    mode = 'supervised'
     for batch_idx, (inputs, labels, depth) in enumerate(train_loader):
         data_time.update(time.time() - end)
         # [8, 1, 256, 512]
@@ -69,12 +70,14 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
         # plt.imshow(tensor_image.permute(1, 2, 0))
         gt_depth = depth.to(device)
         # print(gt_depth.shape)
-        print(inputs.shape)
-        print(gt_semantic_labels.shape)
-        print(inputs[:, -1].shape)
-        print(gt_semantic_labels[:, -1].shape)
         if task == 'segmentation':
             task_pred = model(inputs)
+            if mode == 'unsup':
+                # Compute semi supervised
+                loss_unsup = sum([self.unsuper_loss(inputs=u, targets=targets, conf_mask=self.confidence_masking,
+                                                    threshold=self.confidence_th,
+                                                    use_softmax=False) for u in outputs_ul])
+                loss_unsup = (loss_unsup / len(outputs_ul))
             loss = criterion(task_pred, gt_semantic_labels)
             loss.backward()
             model_opt.step()

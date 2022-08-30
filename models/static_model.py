@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from models.decoder import Decoder, MILADecoder
 from models.encoder import resnet50
 # from mod import AblatedNet
 from models.resnet_encoder import ResNet50, ResNet18
@@ -57,7 +56,7 @@ if __name__ == "__main__":
     prev_sblock_kf = 0
     L = 5
     INPUT_DIM = 512
-    dec_seg = MILADecoder(input_dim=256)
+    # dec_seg = MILADecoder(input_dim=256)
     # dec_seg = Decoder(input_dim=INPUT_DIM)
     # net = AblatedNet(c_in=3, c_out_seg=3)
     # encoder_slow = ResNet50(19, 3)
