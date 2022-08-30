@@ -1,5 +1,5 @@
 import sys
-
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -81,7 +81,7 @@ class DepthDecoder(nn.Module):
         x = F.interpolate(x, size=(128, 256), mode="bilinear", align_corners=True)
         x = self.last_conv(x)
         # x = self.softplus(x)
-        x = self.sigmoid(x)
+        # x = self.sigmoid(x)
         return x
 
     def _init_weight(self):
@@ -196,17 +196,18 @@ class DropOutDecoder(nn.Module):
     def __init__(self, input_dim, num_classes, drop_out, BatchNorm, drop_rate=0.3, spatial_dropout=True):
         super(DropOutDecoder, self).__init__()
         self.dropout = nn.Dropout2d(p=drop_rate) if spatial_dropout else nn.Dropout(drop_rate)
-        self.seg_decoder = SegDecoder(input_dim, num_classes, drop_out, BatchNorm)
+        self.seg_decoder = SegDecoder(input_dim, num_classes, drop_out, BatchNorm).to(device)
 
     def forward(self, x):
-        x = self.seg_decoder(self.dropout(x))
+        x = self.dropout(x)
+        x = self.seg_decoder(x)
         return x
 
 
 class FeatureDropDecoder(nn.Module):
     def __init__(self, input_dim, num_classes, drop_out, BatchNorm):
         super(FeatureDropDecoder, self).__init__()
-        self.seg_decoder = SegDecoder(input_dim, num_classes, drop_out, BatchNorm)
+        self.seg_decoder = SegDecoder(input_dim, num_classes, drop_out, BatchNorm).to(device)
 
     def feature_dropout(self, x):
         attention = torch.mean(x, dim=1, keepdim=True)
@@ -225,7 +226,7 @@ class FeatureDropDecoder(nn.Module):
 class FeatureNoiseDecoder(nn.Module):
     def __init__(self, input_dim, num_classes, drop_out, BatchNorm, uniform_range=0.3):
         super(FeatureNoiseDecoder, self).__init__()
-        self.seg_decoder = SegDecoder(input_dim, num_classes, drop_out, BatchNorm)
+        self.seg_decoder = SegDecoder(input_dim, num_classes, drop_out, BatchNorm).to(device)
         self.uni_dist = Uniform(-uniform_range, uniform_range)
 
     def feature_based_noise(self, x):

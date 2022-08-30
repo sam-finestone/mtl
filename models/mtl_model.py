@@ -34,8 +34,9 @@ class TemporalModel(nn.Module):
     def __init__(self,
                  encoder_slow, encoder_fast,
                  task, class_tasks, seg_drop_out,
-                 window_interval, k=2, version='basic',
-                 semi_sup=False,
+                 window_interval, k, semisup_loss,
+                 unsup_loss,
+                 version='basic',
                  mulit_task=False):
         super().__init__()
         self.encoder_slow = encoder_slow
@@ -43,7 +44,8 @@ class TemporalModel(nn.Module):
         self.K = k
         self.version = version
         self.multi_task = mulit_task
-        self.semi_sup = semi_sup
+        self.semi_sup = semisup_loss
+        self.unsup = unsup_loss
         input_dim_decoder = 256
         list_kf_indicies = [x for x in range(window_interval) if x % self.K == 0]
         list_non_kf_indicies = list(set(range(window_interval)) - set(list_kf_indicies))
@@ -74,37 +76,41 @@ class TemporalModel(nn.Module):
             self.with_se_block = True
             self.se_layer = SE_Layer(input_dim_decoder, 2)
             self.global_attention_block = GlobalContextAttentionBlock(input_dim_t, output_dim, last_affine=True)
-        elif version == 'local_atten_fusion':
-            input_dim_t = 256
-            output_dim = 256
-            kernel_neighbourhood = 9
-            self.self.local_attention_block = LocalContextAttentionBlock(input_dim_t, output_dim,
-                                                                         kernel_neighbourhood, last_affine=True)
+        # elif version == 'local_atten_fusion':
+        #     input_dim_t = 256
+        #     output_dim = 256
+        #     kernel_neighbourhood = 9
+        #     self.self.local_attention_block = LocalContextAttentionBlock(input_dim_t, output_dim,
+        #                                                                  kernel_neighbourhood, last_affine=True)
+
+        if self.semi_sup:
+            # instantiate the different pertubation decoders for the unlabelled data
+            if len(list_kf_indicies) > len(list_non_kf_indicies):
+                if len(list_kf_indicies) > 1:
+                    unlabelled_num_frames = len(list_kf_indicies) + len(list_non_kf_indicies) - 1
+                else:
+                    unlabelled_num_frames = len(list_non_kf_indicies)
+            else:
+                if len(list_non_kf_indicies) > 1:
+                    unlabelled_num_frames = len(list_kf_indicies) + len(list_non_kf_indicies) - 1
+                else:
+                    unlabelled_num_frames = len(list_kf_indicies)
+
+            input_dim_decoder = 256
+            input_dim = 256
+            feature_drop = FeatureDropDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
+            feature_noise = FeatureNoiseDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d,
+                                                uniform_range=0.3)
+            drop_decoder = DropOutDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d, drop_rate=0.3,
+                                          spatial_dropout=True)
+            self.aux_decoder = [drop_decoder, feature_noise, feature_drop]
+            self.convnet_fusion_layer2 = nn.Conv3d(input_dim_decoder, 256, kernel_size=(unlabelled_num_frames, 1, 1),
+                                                   stride=1)
+            self.se_layer_2 = SE_Layer(input_dim_decoder, 2)
+
         # Allocate the appropriate decoder for single task
         if task == 'segmentation':
             self.task_decoder = SegDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
-            if self.semi_sup:
-                # instantiate the different pertubation decoders for the unlabelled data
-                if len(list_kf_indicies) > len(list_non_kf_indicies):
-                    if len(list_kf_indicies) > 1:
-                        unlabelled_num_frames = len(list_kf_indicies) + len(list_non_kf_indicies) - 1
-                    else:
-                        unlabelled_num_frames = len(list_non_kf_indicies)
-                else:
-                    if len(list_non_kf_indicies) > 1:
-                        unlabelled_num_frames = len(list_kf_indicies) + len(list_non_kf_indicies) - 1
-                    else:
-                        unlabelled_num_frames = len(list_kf_indicies)
-
-                input_dim_decoder = 256
-                input_dim = 256
-                feature_drop = FeatureDropDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d).to(device)
-                feature_noise = FeatureNoiseDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d, uniform_range=0.3)
-                drop_decoder = DropOutDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d, drop_rate=0.3, spatial_dropout=True).to(device)
-                self.aux_decoder = [drop_decoder, feature_noise, feature_drop]
-                self.convnet_fusion_layer2 = nn.Conv3d(input_dim_decoder, 256, kernel_size=(unlabelled_num_frames, 1, 1), stride=1)
-                self.se_layer_2 = SE_Layer(input_dim_decoder, 2)
-
             if version == 'conv3d_fusion':
                 input_dim_decoder = 256  # T dimension - but here its the number of keyframes + last fast frame
                 self.task_decoder = DecoderTemporal(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm3d)
@@ -133,18 +139,28 @@ class TemporalModel(nn.Module):
         # Get the keyframes and non-keyframes for slow/fast setting
         print('input shape: ' + str(input.shape)) # - torch.Size([4, 5, 3, 128, 256])
         keyframes, non_keyframes, list_kf_indicies, list_non_kf_indicies = self.get_keyframes(input)
-        enc_slow_ftrs, batch_size, t_dim_slow = self.run_encoder(keyframes, self.encoder_slow)
-        enc_fast_ftrs, _, t_dim_fast = self.run_encoder(non_keyframes, self.encoder_fast)
-        output_slow = self.reshape_output(enc_slow_ftrs, batch_size, t_dim_slow)
-        output_fast = self.reshape_output(enc_fast_ftrs, batch_size, t_dim_fast)
+
+        # check if we are to using regularise the encoders then need the output of all frames in encoders
+        if self.unsup['Mode']:
+            x_slow_all, batch_size, t_dim_slow = self.run_encoder(input, self.encoder_slow)
+            x_fast_all, _, t_dim_fast = self.run_encoder(input, self.encoder_fast) # [12, 256, 8, 16]
+            x_slow_all = self.reshape_output(x_slow_all, input.shape[0], input.shape[1])
+            x_fast_all = self.reshape_output(x_fast_all, input.shape[0], input.shape[1])
+            output_slow = x_slow_all[:, list_kf_indicies]
+            output_fast = x_fast_all[:, list_non_kf_indicies]
+
+        if not self.unsup['Mode']:
+            enc_fast_ftrs, _, t_dim_fast = self.run_encoder(non_keyframes, self.encoder_fast)
+            enc_slow_ftrs, batch_size, t_dim_slow = self.run_encoder(keyframes, self.encoder_slow) # [8, 256, 8, 16]
+            output_slow = self.reshape_output(enc_slow_ftrs, batch_size, t_dim_slow)
+            output_fast = self.reshape_output(enc_fast_ftrs, batch_size, t_dim_fast)
 
         if self.version == 'global_atten_fusion':
             task_predictions = self.global_attention_fusion(output_slow, output_fast, list_kf_indicies,
                                                             list_non_kf_indicies, mulit_task=self.multi_task)
-        if self.version == 'local_atten_fusion':
-            task_predictions = self.local_attention_fusion(output_slow, output_fast, list_kf_indicies,
-                                                           list_non_kf_indicies, mulit_task=self.multi_task)
-
+        # if self.version == 'local_atten_fusion':
+        #     task_predictions = self.local_attention_fusion(output_slow, output_fast, list_kf_indicies,
+        #                                                    list_non_kf_indicies, mulit_task=self.multi_task)
         # last frame is a keyframe frame (slow encoded)
         annotated_frame = {'last_frame': [], 'type': []}
         if max(list_kf_indicies) > max(list_non_kf_indicies):
@@ -176,26 +192,31 @@ class TemporalModel(nn.Module):
         elif self.version == 'convnet_fusion':
             task_predictions = self.convnet_fusion(output_slow, output_fast, annotated_frame, with_se_block=False, mulit_task=self.multi_task)
 
-        if self.semi_sup:
+        # NEEDS FIXING!!!!!
+        if self.semi_sup['Mode']:
             # get the predictions on the unlabbeled frames labels
             unlabelled_frame_fusion = torch.cat([output_slow, output_fast], dim=1)
-            # print(unlabelled_frame_fusion.shape)
-            unlabelled_frame_fusion = unlabelled_frame_fusion.permute(0, 2, 1, 3, 4)
-            unlabelled_frame_fusion = self.convnet_fusion_layer2(unlabelled_frame_fusion)
-            unlabelled_frame_fusion = unlabelled_frame_fusion.permute(0, 1, 2, 3, 4).squeeze()
             print(unlabelled_frame_fusion.shape)
-            if self.se_layer_2 is not None:
-                unlabelled_frame_fusion = self.se_layer_2(unlabelled_frame_fusion)
+            # unlabelled_frame_fusion = unlabelled_frame_fusion.permute(0, 2, 1, 3, 4)
+            # unlabelled_frame_fusion = self.convnet_fusion_layer2(unlabelled_frame_fusion)
+            # unlabelled_frame_fusion = unlabelled_frame_fusion.permute(0, 1, 2, 3, 4).squeeze()
+            # print(unlabelled_frame_fusion.shape)
             # unlabelled_pred will be a list of segmented outputs
             unlabelled_preds = self.run_perturbed_decoders(unlabelled_frame_fusion)
-            return task_predictions, unlabelled_preds
 
-        return task_predictions
+        # Output based on model choice
+        if self.semi_sup['Mode'] and self.unsup['Mode']:
+            return {'supervised': task_predictions, 'semi_supervised': unlabelled_preds, 'encoded_slow': x_slow_all, 'encoded_fast': x_fast_all}
+        elif self.semi_sup['Mode'] and not self.unsup['Mode']:
+            return {'supervised': task_predictions, 'semi_supervised': unlabelled_preds}
+        elif not self.semi_sup['Mode'] and self.unsup['Mode']:
+            return {'supervised': task_predictions, 'encoded_slow': x_slow_all, 'encoded_fast': x_fast_all}
+        else:
+            return {'supervised': task_predictions}
 
     def compose_fusion_tensor(self, annotated_frame, output_slow, output_fast):
         x_fusion_input = torch.ones(output_slow.shape[0], output_slow.shape[1],
-                                    output_slow.shape[2], output_slow.shape[3],
-                                    output_slow.shape[4])
+                                    output_slow.shape[2], output_slow.shape[3])
         if annotated_frame['type'][0] == 'slow_frame':
             if annotated_frame['last_frame'][0] is not None:
                 x_fusion_input = torch.cat([output_slow, output_fast, annotated_frame['last_frame'][0]], dim=1)
@@ -218,9 +239,12 @@ class TemporalModel(nn.Module):
             #  depth decoder or segmentation decoder
             task_predictions = self.task_decoder(x_fusion)
         else:
-            task_predictions = []
-            for task_decoder in self.list_decoders:
-                task_predictions.append(task_decoder(x_fusion))
+            # pass the average fusion to segmentation but not depth
+            depth_pred = self.list_decoders[0](annotated_frame)
+            depth_pred = depth_pred.squeeze(1)
+            seg_pred = self.list_decoders[1](x_fusion)
+            seg_pred = seg_pred.squeeze(1)
+            task_predictions = [depth_pred, seg_pred]
         return task_predictions
 
     def temporal_net(self, output_slow, output_fast, annotated_frame, mulit_task=False):
@@ -235,45 +259,35 @@ class TemporalModel(nn.Module):
             task_predictions = self.task_decoder(x_fusion_input)
             task_predictions = task_predictions.squeeze(1)
         else:
-            task_predictions = []
-            for task_decoder in self.list_decoders:
-                task_pred = task_decoder(x_fusion_input)
-                task_pred = task_pred.squeeze(1)
-                task_predictions.append(task_pred)
+            # pass the average fusion to segmentation but not depth
+            depth_pred = self.list_decoders[0](annotated_frame)
+            depth_pred = depth_pred.squeeze(1)
+            seg_pred = self.list_decoders[1](x_fusion)
+            seg_pred = seg_pred.squeeze(1)
+            task_predictions = [depth_pred, seg_pred]
         return task_predictions
 
     def convnet_fusion(self, output_slow, output_fast, annotated_frame, with_se_block=False, mulit_task=False):
         # take the slow output of the keyframes and the last frame of the fast
-
-        if annotated_frame['type'][0] == 'slow_frame':
-            if annotated_frame['last_frame'][0] is not None:
-                x_fusion = torch.cat([output_slow, output_fast, annotated_frame['last_frame'][0]], dim=1)
-            else:
-                x_fusion = torch.cat([output_slow, output_fast[:, -1].unsqueeze(1)], dim=1)
-        if annotated_frame['type'][0] == 'fast_frame':
-            if annotated_frame['last_frame'][0] is not None:
-                x_fusion = torch.cat([output_slow, output_fast, annotated_frame['last_frame'][0]], dim=1)
-            else:
-                x_fusion = torch.cat([output_slow, output_fast], dim=1)
-
-        x_fusion = x_fusion.permute(0, 2, 1, 3, 4)
+        x_fusion_input = self.compose_fusion_tensor(annotated_frame, output_slow, output_fast)
+        x_fusion = x_fusion_input.permute(0, 2, 1, 3, 4)
         x_fusion = self.convnet_fusion_layer(x_fusion)
         x_fusion = x_fusion.permute(0, 1, 2, 3, 4).squeeze()
         if with_se_block:
             x_fusion = x_fusion.unsqueeze(1)
             x_fusion = self.se_layer(x_fusion)
-
         if not mulit_task:
             #  depth decoder or segmentation decoder
             # task_decoder = self.list_decoders[-1]
             task_predictions = self.task_decoder(x_fusion)
             task_predictions = task_predictions.squeeze(1)
         else:
-            task_predictions = []
-            for task_decoder in self.list_decoders:
-                task_pred = task_decoder(x_fusion)
-                task_pred = task_pred.squeeze(1)
-                task_predictions.append(task_pred)
+            # pass the average fusion to segmentation but not depth
+            depth_pred = self.list_decoders[0](annotated_frame)
+            depth_pred = depth_pred.squeeze(1)
+            seg_pred = self.list_decoders[1](x_fusion)
+            seg_pred = seg_pred.squeeze(1)
+            task_predictions = [depth_pred, seg_pred]
         return task_predictions
 
     def global_attention_fusion(self, output_slow, output_fast, list_kf_indicies, list_non_kf_indicies, mulit_task=False):
@@ -289,6 +303,7 @@ class TemporalModel(nn.Module):
                 attention_fusion.append(self.global_attention_block(output_fast[:, -1], annotated_frame))
             else:
                 # last frame is the only keyframe
+                annotated_frame = output_slow[:, -1]
                 attention_fusion = [self.global_attention_block(output_fast[:, -1], output_slow[:, -1])]
         else:
             if len(list_non_kf_indicies) > 1:
@@ -299,6 +314,7 @@ class TemporalModel(nn.Module):
                 attention_fusion.append(self.global_attention_block(output_fast[:, -1], annotated_frame))
             else:
                 # last frame is a fast_frame and there is no other fast frames, could be many keyframes
+                annotated_frame = output_fast[:, -1]
                 attention_fusion = [self.global_attention_block(output_slow[:, i], output_fast[:, -1])
                                     for i in range(output_slow.shape[1])]
 
@@ -311,22 +327,19 @@ class TemporalModel(nn.Module):
         if self.with_se_block:
             # x_fusion = attn_fusion_tensor.unsqueeze(1)
             attn_fusion_tensor = self.se_layer(attn_fusion_tensor)
-        # print('after se layer')
-        # print(attn_fusion_tensor.shape)
         if not mulit_task:
             #  depth decoder or segmentation decoder
-            # task_decoder = self.list_decoders[-1]
             task_predictions = self.task_decoder(attn_fusion_tensor)
             task_predictions = task_predictions.squeeze(1)
-            print('task_predictions.shape: ' + str(task_predictions.shape))
         else:
-            task_predictions = []
-            for task_decoder in self.list_decoders:
-                task_pred = task_decoder(x_fusion)
-                task_pred = task_pred.squeeze(1)
-                task_predictions.append(task_pred)
+            # pass the average fusion to segmentation but not depth
+            depth_pred = self.list_decoders[0](annotated_frame)
+            depth_pred = depth_pred.squeeze(1)
+            seg_pred = self.list_decoders[1](attn_fusion_tensor)
+            seg_pred = seg_pred.squeeze(1)
+            task_predictions = [depth_pred, seg_pred]
         return task_predictions
-
+    # local attention if time permits, but does not work
     def local_attention_fusion(self, output_slow, output_fast, mulit_task=False):
         # take the slow output of the keyframes and the last frame of the fast
         # output_slow = output_slow.to('cuda:0')
@@ -368,11 +381,19 @@ class TemporalModel(nn.Module):
         return task_predictions
 
     def run_perturbed_decoders(self, unlabeled_frames):
+        # Reshape the unlabeled_frames
+        frame_batch_dim = unlabeled_frames.shape[0]
+        frames_t_dim = unlabeled_frames.shape[1]
+        frame_2d_batch = frame_batch_dim * frames_t_dim
+        unlabeled_frames = torch.reshape(unlabeled_frames, (frame_2d_batch, unlabeled_frames.shape[2],
+                                                            unlabeled_frames.shape[3],
+                                                            unlabeled_frames.shape[4]))
         # task predictions for each set or unlabelled frames
         task_predictions = []
         for decoder in self.aux_decoder:
             # send the unlabelled frames through each perturbed decoders to create 3 sets of
             output = decoder(unlabeled_frames)
+            output = self.reshape_output(output, frame_batch_dim, frames_t_dim)
             task_predictions.append(output)
         return task_predictions
 
@@ -457,7 +478,7 @@ class TemporalModel(nn.Module):
 
     def reshape_output(self, input, batch_dim, t_dim):
         output = torch.reshape(input, (batch_dim, t_dim, input.shape[1],
-                                      input.shape[2], input.shape[3]))
+                                       input.shape[2], input.shape[3]))
         return output
 
     # function to log the weights of the model
