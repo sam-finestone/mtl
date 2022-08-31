@@ -90,8 +90,6 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
 
         if task == 'depth':
             task_pred = model(inputs)
-            print(task_pred.shape)
-            print(gt_depth.shape)
             # print(gt_depth[0])
             # print(task_pred[0])
             # task_pred = task_pred.squeeze()
@@ -127,10 +125,10 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             model_opt.step()
 
             # Get seg metrics
-            task_pred = seg_pred.detach().max(dim=1)[1].cpu().numpy()
+            seg_pred = seg_pred.detach().max(dim=1)[1].cpu().numpy()
             gt_semantic_labels = gt_semantic_labels.cpu().numpy()
             # loss = criterion(task_pred, gt_semantic_labels.squeeze())
-            metrics.update(gt_semantic_labels, task_pred)
+            metrics.update(gt_semantic_labels, seg_pred)
             curr_mean_acc = metrics.get_results()['Mean Acc']
             curr_mean_iou = metrics.get_results()['Mean IoU']
 
@@ -143,7 +141,7 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
 
             # get depth metric
             # abs_err, rel_err = depth_error(depth_pred, gt_depth)
-            abs_err, rel_err = depth_error2(task_pred, gt_depth)
+            abs_err, rel_err = depth_error2(depth_pred, gt_depth)
             abs_error_running.update(abs_err)
             rel_error_running.update(rel_err)
 
@@ -281,9 +279,9 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                 seg_weight = 0.5
                 total_loss = (depth_weight * depth_loss) + (seg_loss * seg_weight)
 
-                task_pred = task_pred.detach().max(dim=1)[1].cpu().numpy()
+                seg_pred = seg_pred.detach().max(dim=1)[1].cpu().numpy()
                 gt_semantic_labels = gt_semantic_labels.cpu().numpy()
-                metrics.update(gt_semantic_labels, task_pred)
+                metrics.update(gt_semantic_labels, seg_pred)
 
                 bs = inputs.size(0)  # current batch size
                 loss = total_loss.item()
@@ -295,13 +293,13 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
 
                 # Save visualizations of first batch
                 if batch_idx == 0 and save_val_imgs is not None:
-                    img_id = save_val_results_seg(inputs, gt_semantic_labels, task_pred, img_id, test_loader, folder)
+                    img_id = save_val_results_seg(inputs, gt_semantic_labels, seg_pred, img_id, test_loader, folder)
                     imgs = inputs.data.cpu().numpy()
                     gt_depth_ = gt_depth.data.cpu().numpy()
                     pred_depth_ = depth_pred.data.cpu().numpy()
                     for i in range(inputs.size(0)):
                         filename = filepath[i]
-                        save_visualization_depth(i, imgs, pred_depth_, gt_depth_, filename, folder)
+                        save_visualization_depth(i, epoch, imgs, pred_depth_, gt_depth_, filename, test_loader, folder)
 
 
         batch_time.update(time.time() - end)
@@ -392,11 +390,11 @@ def save_visualization_depth(index, epoch, imgs, pred_depth_, gt_depth_, filenam
     img_input = (denorm(imgs[index]) * 255).transpose(1, 2, 0).astype(np.uint8)
     # pred_target = pred_depth_[index][0] / 255
     # pred_target = loader.dataset.unmap_disparity(pred_depth_[index][0])
-    pred_target = pred_depth_[index][0]  # [128, 256]
+    pred_target = pred_depth_[index][0].squeeze()  # [128, 256]
     # pred_target = cv2.normalize(pred_target, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
     # pred_target = pred_target.astype(np.uint8)
     # pred_target = loader.dataset.map_to_rgb(pred_depth_[index][0])
-    img_gt = gt_depth_[index][0]
+    img_gt = gt_depth_[index][0].squeeze()
     # img_gt = cv2.normalize(img_gt, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
     # img_gt = img_gt.astype(np.uint8)
     # img_gt = loader.dataset.map_to_rgb(gt_depth_[index][0])

@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 
 ########################################## STATIC TRAINING/EVALUTATION ########################################
 
-def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt, scheduler, task, LOG_FILE):
+def static_single_task_trainer(epoch, criterion, semisup_loss, unsup_loss, train_loader, model, model_opt, scheduler, task, LOG_FILE):
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     loss_running = AverageMeter('Loss', ':.4e')
@@ -58,7 +58,8 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
     # initialise the loss the function
     # metric_calculator = SegmentationMetrics(average=True, ignore_background=True)
     end = time.time()
-    mode = 'supervised'
+    loss_semi_sup = 0
+    loss_unsup = 0
     for batch_idx, (inputs, labels, depth) in enumerate(train_loader):
         data_time.update(time.time() - end)
         # [8, 1, 256, 512]
@@ -69,18 +70,35 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
         # torch.Size([8, 3, 256, 512])
         # plt.imshow(tensor_image.permute(1, 2, 0))
         gt_depth = depth.to(device)
-        # print(gt_depth.shape)
+
+        output = model(inputs)
+
+        if semisup_loss['Mode']:
+            # unlabelled_pred_task is the predictions of the unlabelled frames through perturbed decoders (list)
+            semi_supervised_output = output['semi_supervised'] # list of 3 atm [[8, 2, 19, 128, 256], [8, 2, 19, 128, 256],..]
+            # main_pred_task = output['supervised']  # [8, 19, 128, 256]
+            main_pred_task = semi_supervised_output[1]
+            perturbed_unlabelled_pred = semi_supervised_output[2]
+            # Compute semi supervised loss
+            loss_semi_sup = sum([semisup_loss['Function'](inputs=u, targets=main_pred_task, conf_mask=False,
+                                                          threshold=0.5, use_softmax=False) for u in perturbed_unlabelled_pred])
+            loss_semi_sup = (loss_semi_sup / len(perturbed_unlabelled_pred))
+            weight_u = semisup_loss['Weights'](epoch=semisup_loss['Epochs'], curr_iter=epoch)
+            loss_semi_sup = loss_semi_sup * weight_u
+
+        if unsup_loss['Mode']:
+            slow_encoded_output = output['encoded_slow']
+            fast_encoded_output = output['encoded_fast']
+            # add regularization to encoders for similar representation
+            loss_unsup = unsup_loss['Function'](slow_encoded_output, fast_encoded_output)
+
         if task == 'segmentation':
-            task_pred = model(inputs)
-            if mode == 'unsup':
-                # Compute semi supervised
-                loss_unsup = sum([self.unsuper_loss(inputs=u, targets=targets, conf_mask=self.confidence_masking,
-                                                    threshold=self.confidence_th,
-                                                    use_softmax=False) for u in outputs_ul])
-                loss_unsup = (loss_unsup / len(outputs_ul))
-            loss = criterion(task_pred, gt_semantic_labels)
-            loss.backward()
+            task_pred = output['supervised']
+            sup_loss = criterion(task_pred, gt_semantic_labels)
+            total_loss = sup_loss + loss_semi_sup + loss_unsup
+            total_loss.backward()
             model_opt.step()
+
             # Get metrics
             task_pred = task_pred.detach().max(dim=1)[1].cpu().numpy()
             gt_semantic_labels = gt_semantic_labels.cpu().numpy()
@@ -88,26 +106,30 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             metrics.update(gt_semantic_labels, task_pred)
             curr_mean_acc = metrics.get_results()['Mean Acc']
             curr_mean_iou = metrics.get_results()['Mean IoU']
+
             # store loss
             bs = inputs.size(0)
             # loss = loss.item()
-            loss = loss.detach().cpu().numpy()
-            loss_running.update(loss, bs)
+            total_loss = total_loss.detach().cpu().numpy()
+            loss_running.update(total_loss, bs)
             acc_running.update(curr_mean_acc, bs)
             miou_running.update(curr_mean_iou, bs)
 
         if task == 'depth':
-            task_pred = model(inputs)
-            print(task_pred.type)
-            print(gt_depth.type)
-            loss = criterion(task_pred, gt_depth)
-            loss.backward()
+            task_pred = output['supervised']
+            # print(task_pred.type)
+            # print(gt_depth.type)
+            print(task_pred.shape)
+            print(gt_depth.shape)
+            sup_loss = criterion(task_pred, gt_depth)
+            total_loss = sup_loss + loss_semi_sup + loss_unsup
+            total_loss.backward()
             model_opt.step()
 
             # store loss
             bs = inputs.size(0)
-            loss = loss.item()
-            loss_running.update(loss, bs)
+            total_loss = total_loss.item()
+            loss_running.update(total_loss, bs)
 
             # compute the depth metrics
             # abs_err, rel_err = depth_error2(task_pred, gt_depth)
@@ -116,17 +138,17 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             rel_error_running.update(rel_err)
 
         if task == 'depth_segmentation':
-            depth_pred, seg_pred = model(inputs)
-            # task_pred = model(inputs)
-            # print(depth_pred.shape)
-            # break
+            # depth_pred, seg_pred = model(inputs)
+            depth_pred = output['supervised'][0]
+            seg_pred = output['supervised'][1]
             seg_loss = criterion[1](seg_pred, gt_semantic_labels)
             depth_loss = criterion[0](depth_pred, gt_depth)
 
             # Equal Weighted losses
             depth_weight = 0.5
             seg_weight = 0.5
-            total_loss = (depth_weight * depth_loss) + (seg_loss * seg_weight)
+            sup_loss = (depth_weight * depth_loss) + (seg_loss * seg_weight)
+            total_loss = sup_loss + loss_semi_sup + loss_unsup
             total_loss.backward()
             model_opt.step()
 
@@ -157,12 +179,12 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
         if batch_idx % 25 == 0:
             if task == 'segmentation':
                 with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as batch_log:
-                    batch_log.write('{}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, batch_idx, loss,
+                    batch_log.write('{}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, batch_idx, total_loss,
                                                                           metrics.get_results()['Mean Acc']))
             if task == 'depth':
                 with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as batch_log:
                     batch_log.write('{}, {}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, batch_idx,
-                                                                              loss,abs_err, rel_err))
+                                                                              total_loss, abs_err, rel_err))
 
 
         batch_time.update(time.time() - end)
@@ -179,8 +201,7 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
         return loss_running.avg, mean_acc, mean_miou
     return loss_running.avg, abs_error_running.avg, rel_error_running.avg, mean_acc, mean_miou
 
-
-def static_test_single_task(epoch, criterion, test_loader, single_task_model, task, classLabels, validClasses,
+def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loader, single_task_model, task, classLabels, validClasses,
                             folder, void=0, maskColors=None, save_val_imgs=None):
     # evaluating test data
     # SAMPLES_PATH
@@ -217,21 +238,47 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
     # metric_calculator = SegmentationMetrics(average=True, ignore_background=True)
     end = time.time()
     img_id = 0
+    loss_semi_sup = 0
+    loss_unsup = 0
     with torch.no_grad():
         for batch_idx, (inputs, labels, depth, filepath) in enumerate(test_loader):
             inputs = inputs.float().to(device)
             gt_semantic_labels = labels.long().to(device)
             gt_depth = depth.to(device)
-            task_pred = single_task_model(inputs)
+            output = single_task_model(inputs)
+
+            if semisup_loss['Mode']:
+                # unlabelled_pred_task is the predictions of the unlabelled frames through perturbed decoders (list)
+                semi_supervised_output = output['semi_supervised']  # list of 3 atm [[8, 2, 19, 128, 256], [8, 2, 19, 128, 256],..]
+                # main_pred_task = output['supervised']  # [8, 19, 128, 256]
+                main_pred_task = semi_supervised_output[1]
+                perturbed_unlabelled_pred = semi_supervised_output[2]
+                # Compute semi supervised loss
+                loss_semi_sup = sum([semisup_loss['Function'](inputs=u, targets=main_pred_task, conf_mask=False,
+                                                              threshold=0.5, use_softmax=False) for u in
+                                     perturbed_unlabelled_pred])
+                loss_semi_sup = (loss_semi_sup / len(perturbed_unlabelled_pred))
+                weight_u = semisup_loss['Weights'](epoch=semisup_loss['Epochs'], curr_iter=epoch)
+                loss_semi_sup = loss_semi_sup * weight_u
+
+            if unsup_loss['Mode']:
+                slow_encoded_output = output['encoded_slow']
+                fast_encoded_output = output['encoded_fast']
+                # add regularization to encoders for similar representation
+                loss_unsup = unsup_loss['Function'](slow_encoded_output, fast_encoded_output)
+
+
             if task == 'segmentation':
-                loss = criterion(task_pred, gt_semantic_labels)
+                task_pred = output['supervised']
+                sup_loss = criterion(task_pred, gt_semantic_labels)
+                total_loss = sup_loss + loss_semi_sup + loss_unsup
                 task_pred = task_pred.detach().max(dim=1)[1].cpu().numpy()
                 gt_semantic_labels = gt_semantic_labels.cpu().numpy()
                 metrics.update(gt_semantic_labels, task_pred)
 
                 bs = inputs.size(0)
-                loss = loss.item()
-                loss_running.update(loss, bs)
+                total_loss = total_loss.item()
+                loss_running.update(total_loss, bs)
 
                 # Save visualizations of first batch
                 if batch_idx == 0 and save_val_imgs is not None:
@@ -242,10 +289,12 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
             if task == 'depth':
                 # print(task_pred.shape)
                 # print(gt_depth.shape)
-                loss = criterion(task_pred, gt_depth)
+                task_pred = output['supervised']
+                sup_loss = criterion(task_pred, gt_depth)
+                total_loss = sup_loss + loss_semi_sup + loss_unsup
                 bs = inputs.size(0)  # current batch size
-                loss = loss.item()
-                loss_running.update(loss, bs)
+                total_loss = total_loss.item()
+                loss_running.update(total_loss, bs)
                 abs_err, rel_err = depth_error2(task_pred, gt_depth)
                 # abs_err, rel_err = depth_error(task_pred, gt_depth)
                 abs_error_running.update(abs_err)
@@ -261,14 +310,17 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                         save_visualization_depth(i, imgs, pred_depth_, gt_depth_, filename, folder)
 
         if task == 'depth_segmentation':
-                depth_pred, seg_pred = single_task_model(inputs)
+                depth_pred = output['supervised'][0]
+                seg_pred = output['supervised'][1]
+                # depth_pred, seg_pred = single_task_model(inputs)
                 seg_loss = criterion[1](seg_pred, gt_semantic_labels)
                 depth_loss = criterion[0](depth_pred, gt_depth)
 
                 # Equal Weighted losses
                 depth_weight = 0.5
                 seg_weight = 0.5
-                total_loss = (depth_weight * depth_loss) + (seg_loss * seg_weight)
+                sup_loss = (depth_weight * depth_loss) + (seg_loss * seg_weight)
+                total_loss = sup_loss + loss_semi_sup + loss_unsup
                 task_pred = task_pred.detach().max(dim=1)[1].cpu().numpy()
                 gt_semantic_labels = gt_semantic_labels.cpu().numpy()
                 metrics.update(gt_semantic_labels, task_pred)

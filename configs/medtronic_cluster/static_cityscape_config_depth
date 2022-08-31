@@ -22,9 +22,9 @@ data:
 
 training:
     n_workers: 8
-    train_iters: 2
+    train_iters: 300
     batch_size: 8
-    val_interval: 1
+    val_interval: 50
     print_interval: 2
     pretrain: True
     loss:

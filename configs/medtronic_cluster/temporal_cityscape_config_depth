@@ -7,7 +7,8 @@ model:
             resnet_fast: resnet18 # resnet50 or resnet18 or resnset101
     dropout: 0.5
     path_num: 2
-    window_size: 5
+    window_size: 3
+    version: average_fusion
     k: 2
     frames_per_segment: 48
     tasks: depth # depth or segmentation
@@ -23,10 +24,10 @@ data:
     path: /mnt/c44578a3-8e98-4fc3-a8b4-72266618fb8a/sam_dataset/data/cityscapes_static
 
 training:
-    n_workers: 8
-    train_iters: 2
+    n_workers: 4
+    train_iters: 200
     batch_size: 8
-    val_interval: 1
+    val_interval: 25
     print_interval: 2
     pretrain: True
     loss:

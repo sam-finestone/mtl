@@ -22,7 +22,7 @@ data:
 
 training:
     n_workers: 4
-    train_iters: 2
+    train_iters: 300
     batch_size: 8
     val_interval: 1
     print_interval: 2

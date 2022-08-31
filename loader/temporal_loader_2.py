@@ -21,6 +21,7 @@ import json
 from PIL import Image
 from collections import namedtuple
 
+
 def init_seed(manual_seed, en_cudnn=False):
     '''
     Disable cudnn to maximize reproducibility
@@ -44,6 +45,7 @@ def recursive_glob(rootdir=".", suffix=""):
         if filename.endswith(suffix)
     ]
 
+
 def recursive_glob_set(rootdir=".", suffix=""):
     """Performs recursive glob with given suffix and rootdir
         :param rootdir is the root directory
@@ -56,7 +58,8 @@ def recursive_glob_set(rootdir=".", suffix=""):
         if filename.endswith(suffix)
     )
 
-class temporalLoader(data.Dataset):
+
+class temporalLoader2(data.Dataset):
     """cityscapesLoader
 
     https://www.cityscapes-dataset.com
@@ -118,7 +121,6 @@ class temporalLoader(data.Dataset):
     #                      (70, 130, 180), (220, 20, 60), (0, 0, 142)]
     # train_id_to_color = np.array(train_id_to_color)
     # id_to_train_id = np.array([c.category_id for c in classes], dtype='uint8') - 1
-
 
     def __init__(
             self,
@@ -233,7 +235,6 @@ class temporalLoader(data.Dataset):
             transforms.Resize((128, 256)),
         ])
 
-
         self.ignore_index = 19
         self.class_map = dict(zip(self.valid_classes, range(19)))
         self.img_transform = transforms.Compose([transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
@@ -287,15 +288,15 @@ class temporalLoader(data.Dataset):
             # label_target = self.lbl_transform_train(label_target)
             # label_target = torch.from_numpy(np.array(label_target, dtype='uint8'))
         # else:
-            # label_target = self.lbl_transform_val(label_target)
-            # label_target = torch.from_numpy(np.array(label_target, dtype='uint8'))
+        # label_target = self.lbl_transform_val(label_target)
+        # label_target = torch.from_numpy(np.array(label_target, dtype='uint8'))
         label_target = self.encode_target(label_target)
         label_target = torch.from_numpy(label_target).long()
         annotated_frame_index = int(cur_frame)
         start_index = annotated_frame_index - (self.window_size - 1)
         end_index = annotated_frame_index + 1
+        mask_interested_frames = [0, self.window_size-1, self.window_size]
         # print(annotated_frame_index)
-        mask_interested_frames = [0, self.window_size-2, self.window_size-1]
         for index_frame in range(start_index, end_index):
             image_path = os.path.join(self.videos_base, city, ("%s_%s_%06d_leftImg8bit.png" % (city, seq, index_frame)))
             depth_path = os.path.join(self.depth_base, city, ("%s_%s_%06d_disparity.png" % (city, seq, index_frame)))
@@ -327,11 +328,21 @@ class temporalLoader(data.Dataset):
         # segmentation_labels = torch.stack(segmentation_labels, dim=0)
         depth_labels = torch.stack(depth_lbl, dim=0)
         images = torch.stack(images, dim=0)
-        images = images[mask_interested_frames,:]
-        depth_labels = depth_labels[mask_interested_frames,:]
-        img_path_list = [img_path_list[i] for i in mask_interested_frames]
+        print(images.shape)
+        print(depth_labels.shape)
+        print(label_target.shape)
+        print(img_path.shape)
+        
+        images = images[mask_interested_frames, ]
+        depth_labels = depth_labels[mask_interested_frames, ]
+        label_target = label_target[mask_interested_frames, ]
+        img_path = img_path[mask_interested_frames, ]
+        print(images.shape)
+        print(depth_labels.shape)
+        print(label_target.shape)
+        print(img_path.shape)
         if self.split == 'val' or self.split == 'test':
-            return images, label_target, depth_labels, img_path_list
+            return images, label_target, depth_labels, img_path
         # print(images.shape) - torch.Size([5, 3, 128, 256])
         # print(label_target.shape) - torch.Size([128, 256])
         # print(depth_labels.shape) - torch.Size([5, 1, 128, 256])
@@ -373,6 +384,7 @@ class temporalLoader(data.Dataset):
             mask[mask == _predc] = self.valid_classes[_predc]
         return mask.astype(np.uint8)
 
+
 class cityscapesLoader(data.Dataset):
     """cityscapesLoader
 
@@ -410,17 +422,15 @@ class cityscapesLoader(data.Dataset):
 
     label_colours = dict(zip(range(20), colors))
 
-
-
     def __init__(
-        self,
-        root,
-        split="train",
-        augmentations=None,
-        test_mode=False,
-        model_name=None,
-        frames_per_segment=30,
-        path_num=2,
+            self,
+            root,
+            split="train",
+            augmentations=None,
+            test_mode=False,
+            model_name=None,
+            frames_per_segment=30,
+            path_num=2,
     ):
         """__init__
 
@@ -440,7 +450,7 @@ class cityscapesLoader(data.Dataset):
         self.model_name = model_name
         self.n_classes = 19
         self.files = {}
-        self.seg_files ={}
+        self.seg_files = {}
 
         self.images_base = os.path.join(self.root, "leftImg8bit", self.split)
         self.videos_base = os.path.join(self.root, "leftImg8bit_sequence", self.split)
@@ -527,7 +537,6 @@ class cityscapesLoader(data.Dataset):
 
         return start_indices
 
-
     def __getitem__(self, index):
         """__getitem__
 
@@ -544,7 +553,7 @@ class cityscapesLoader(data.Dataset):
         frame_index = int(start_index)
         end_frame = self.__len__() - 1
         # create the sliding window for each annotated index
-            
+
         # load self.frames_per_segment consecutive frames
         for _ in range(self.frames_per_segment):
             img_path = self.files[self.split][frame_index].rstrip()
@@ -624,6 +633,7 @@ class cityscapesLoader(data.Dataset):
             mask[mask == _predc] = self.valid_classes[_predc]
         return mask.astype(np.uint8)
 
+
 # key2aug = {
 #     "rcrop": RandomCrop,
 #     "hflip": RandomHorizontallyFlip,
@@ -679,12 +689,12 @@ if __name__ == "__main__":
     # data_loader = get_loader(cfg["data"]["dataset"])
     data_path = cfg["data"]["path"]
     train_augmentations = torch.nn.Sequential(
-                                            transforms.Resize(size=(2048, 1024)),
-                                            transforms.RandomCrop(size=(512, 1024)),
-                                            transforms.RandomHorizontalFlip(p=0.5),
-                                            # transforms.Normalize(mean=(123.675, 116.28, 103.53),
-                                            #                      std=(58.395, 57.12, 57.375)),
-                                            transforms.Pad(padding=(512, 1024)))
+        transforms.Resize(size=(2048, 1024)),
+        transforms.RandomCrop(size=(512, 1024)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        # transforms.Normalize(mean=(123.675, 116.28, 103.53),
+        #                      std=(58.395, 57.12, 57.375)),
+        transforms.Pad(padding=(512, 1024)))
     t_loader = temporalLoader(data_path,
                               split=cfg["data"]["train_split"],
                               augmentations=train_augmentations,
@@ -698,7 +708,6 @@ if __name__ == "__main__":
                                   drop_last=True)
 
     # augmentations = Compose([Scale(2048), RandomRotate(10), RandomHorizontallyFlip(0.5)])
-
 
     # scripted_transforms = torch.jit.script(transforms)
     # local_path = "/home/zcqsspf/Scratch/data/cityscapes"

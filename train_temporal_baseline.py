@@ -8,7 +8,7 @@ import logging
 # from tensorboardX import SummaryWriter
 # from torchvision.datasets import Cityscapes
 from loader.cityscapes_loader import cityscapesLoader
-from loader.city_loader import staticLoader
+from loader.static_loader import staticLoader
 from loader.temporal_loader import temporalLoader
 # from loader.video_dataset import *
 from utils.sort_dataset import *
@@ -23,7 +23,8 @@ from utils.temporal_helpers import static_single_task_trainer, static_test_singl
 
 from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback, SynchronizedBatchNorm3d
 from utils.metrics import plot_learning_curves
-from loss.loss import InverseDepthL1Loss, L1LossIgnoredRegion, consistency_weight
+from loss.loss import InverseDepthL1Loss, L1LossIgnoredRegion, consistency_weight,  \
+    softmax_mse_loss, softmax_kl_loss, softmax_js_loss
 from scheduler import get_scheduler
 # from deeplabv3plus import Deeplab_v3plus
 import deeplab
@@ -54,6 +55,7 @@ parser.add_argument("--config", default='configs/medtronic_cluster/temporal_city
 # uncomment for depth run
 # parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_depth',
 #                     nargs="?", type=str, help="Configuration file to use")
+
 # uncomment for both tasks
 # parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
 #                     nargs="?", type=str, help="Configuration file to use")
@@ -171,8 +173,8 @@ print('Initialising Temporal Model')
 deeplabv3_backbone_slow = cfg["model"]["backbone"]["encoder"]["resnet_slow"]
 deeplabv3_backbone_fast = cfg["model"]["backbone"]["encoder"]["resnet_fast"]
 
-encoder_slow = DeepLabv3(deeplabv3_backbone_slow).to(device)
-encoder_fast = DeepLabv3(deeplabv3_backbone_fast).to(device)
+# encoder_slow = DeepLabv3(deeplabv3_backbone_slow).to(device)
+# encoder_fast = DeepLabv3(deeplabv3_backbone_fast).to(device)
 
 # enc_optimizer = optim.SGD(enc.parameters(),
 #                           lr=cfg["training"]["optimizer"]["lr0"],
@@ -183,13 +185,16 @@ encoder_fast = DeepLabv3(deeplabv3_backbone_fast).to(device)
 drop_out = cfg["model"]["dropout"]
 version = cfg["model"]["version"]
 
-# version = 'advers'
 # version = 'convnet_fusion'
 # version = 'global_atten_fusion'
 # version = 'conv3d_fusion'
 version = 'average_fusion'
-unsup_= False
-semi_sup_ = True
+
+unsup_ = False
+semi_sup_ = False
+mulit_task_ = False
+
+window_size = 3 
 
 # if we are to add semi-supervision on the unlabelled frames
 if semi_sup_:
@@ -198,7 +203,7 @@ if semi_sup_:
     rampup_ends = int(ram_up * EPOCHS)
     cons_w_unsup = consistency_weight(final_w=unsupervised_w, iters_per_epoch=len(train_dataloader),
                                       rampup_ends=rampup_ends)
-    semisup_loss = {'Mode': True, 'Function': cons_w_unsup}
+    semisup_loss = {'Mode': True, 'Function': softmax_mse_loss, 'Weights': cons_w_unsup, 'Epochs': EPOCHS}
 else:
     semisup_loss = {'Mode': False, 'Function': None}
 
@@ -207,26 +212,37 @@ if unsup_:
 else:
     unsup_loss = {'Mode': False, 'Function': None}
 
+if TASK == 'depth_segmentation':
+    mulit_task_ = True
 
 # initialise multi (or single) - task model
-model = TemporalModel(encoder_slow, encoder_fast, TASK, CLASS_TASKS, drop_out,
-                      window_size, k, semisup_loss, unsup_loss, version=version, mulit_task=False).to(device)
+model = TemporalModel(cfg, TASK, CLASS_TASKS, drop_out,
+                      window_size, k, semisup_loss, unsup_loss, version=version, mulit_task=mulit_task_).to(device)
 # model = model.to(device)
 # Push model to GPU
 if torch.cuda.is_available():
     model = torch.nn.DataParallel(model).to(device)
     print('Model pushed to {} GPU(s), type {}.'.format(torch.cuda.device_count(), torch.cuda.get_device_name(0)))
 
-model_opt = optim.Adam(model.parameters(), lr=0.01)
+model_opt = optim.Adam(model.parameters(), lr=0.0001)
 # model_opt = optim.Adam(model.parameters(), lr=cfg["training"]["optimizer"]["lr0"])
 scheduler = optim.lr_scheduler.StepLR(model_opt,
-                                      step_size=1000,
-                                      gamma=0.1)
+                                      step_size=100,
+                                      gamma=0.5)
 
 # directory name to save the models
-MODEL_SAVE_PATH = os.path.join(args.model_save_path, 'Model', 'Checkpoints', 'Temporal', version, TASK)
-LOG_FILE = os.path.join(args.model_save_path, 'Logs', 'Temporal', TASK, version)
-SAMPLES_PATH = os.path.join(args.model_save_path, 'Model', 'Sample', 'Temporal', version, TASK)
+if semi_sup_ and  unsup_:
+    file = TASK + '_semisup_and_unsup_' + str(window_size)
+elif semi_sup_ and  not unsup_:
+    file = TASK + '_semisup_' + str(window_size)
+elif not semi_sup_ and unsup_:
+    file = TASK + '_unsup_' + str(window_size)
+else:
+    file = TASK + str(window_size)
+
+MODEL_SAVE_PATH = os.path.join(args.model_save_path, 'Model', 'Checkpoints', 'Temporal', version, file)
+LOG_FILE = os.path.join(args.model_save_path, 'Logs', 'Temporal', version, file)
+SAMPLES_PATH = os.path.join(args.model_save_path, 'Model', 'Sample', 'Temporal', version, file)
 
 if not os.path.exists(MODEL_SAVE_PATH):
     os.makedirs(MODEL_SAVE_PATH)
@@ -333,7 +349,7 @@ elif TASK == 'depth_segmentation':
     # criterion = torch.nn.MSELoss()
     # criterion = torch.nn.L1Loss()
     # criterion = [InverseDepthL1Loss(), torch.nn.CrossEntropyLoss(ignore_index=train_set.ignore_index)]
-    criterion = [L1LossIgnoredRegion(), torch.nn.CrossEntropyLoss(ignore_index=train_set.ignore_index, reduction='mean')]
+    criterion = [L1LossIgnoredRegion(), torch.nn.CrossEntropyLoss(ignore_index=255, reduction='mean')]
 
 print('Beginning training...')
 with mlflow.start_run():
@@ -381,8 +397,8 @@ with mlflow.start_run():
             # Validate
             if epoch % cfg['training']['val_interval'] == 0:
                 print('--- Validation ---')
-                val_acc, val_loss, val_miou = static_test_single_task(epoch, criterion, val_dataloader,
-                                                                      model, TASK, classLabels,
+                val_acc, val_loss, val_miou = static_test_single_task(epoch, criterion, semisup_loss, unsup_loss,
+                                                                      val_dataloader, model, TASK, classLabels,
                                                                       validClasses, SAMPLES_PATH, void=0,
                                                                       maskColors=None, save_val_imgs=True)
                 metrics['val_acc'].append(val_acc)
@@ -416,9 +432,9 @@ with mlflow.start_run():
 
 
         elif TASK == 'depth':
-            train_loss, train_abs_err, train_rel_err = static_single_task_trainer(epoch, criterion, train_dataloader,
-                                                                                  model, model_opt, scheduler, TASK,
-                                                                                  LOG_FILE)
+            train_loss, train_abs_err, train_rel_err = static_single_task_trainer(epoch, criterion, semisup_loss,
+                                                                                  unsup_loss, train_dataloader, model,
+                                                                                  model_opt, scheduler, TASK, LOG_FILE)
             metrics['train_loss'].append(train_loss)
             metrics['train_abs_error'].append(train_abs_err)
             metrics['train_rel_error'].append(train_rel_err)
@@ -431,11 +447,10 @@ with mlflow.start_run():
             # Validate
             if epoch % cfg['training']['val_interval'] == 0:
                 print('--- Validation ---')
-                val_rel_error, val_abs_error, val_loss = static_test_single_task(epoch, criterion, val_dataloader,
-                                                                                 model,
-                                                                                 TASK, classLabels, validClasses,
-                                                                                 SAMPLES_PATH, void=0, maskColors=None,
-                                                                                 save_val_imgs=True)
+                val_rel_error, val_abs_error, val_loss = static_test_single_task(epoch, criterion, semisup_loss, unsup_loss,
+                                                                                 val_dataloader, model, TASK, classLabels,
+                                                                                 validClasses, SAMPLES_PATH, void=0,
+                                                                                 maskColors=None, save_val_imgs=True)
                 metrics['val_abs_error'].append(val_abs_error)
                 metrics['val_loss'].append(val_loss)
                 metrics['val_rel_error'].append(val_rel_error)
@@ -469,12 +484,13 @@ with mlflow.start_run():
         elif TASK == 'depth_segmentation':
             train_loss, train_abs_err, train_rel_err, train_acc, train_miou = static_single_task_trainer(epoch,
                                                                                                          criterion,
+                                                                                                         semisup_loss,
+                                                                                                         unsup_loss,
                                                                                                          train_dataloader,
                                                                                                          model,
                                                                                                          model_opt,
                                                                                                          scheduler,
-                                                                                                         TASK,
-                                                                                                         LOG_FILE)
+                                                                                                         TASK, LOG_FILE)
             metrics['train_loss'].append(train_loss)
             metrics['train_abs_error'].append(train_abs_err)
             metrics['train_rel_error'].append(train_rel_err)
@@ -492,13 +508,10 @@ with mlflow.start_run():
             if epoch % cfg['training']['val_interval'] == 0:
                 print('--- Validation ---')
                 val_loss, val_abs_err, val_rel_err, val_acc, val_miou = static_test_single_task(epoch, criterion,
-                                                                                                val_dataloader, model,
-                                                                                                TASK, classLabels,
-                                                                                                validClasses,
-                                                                                                SAMPLES_PATH,
-                                                                                                void=0,
-                                                                                                maskColors=mask_colors,
-                                                                                                args=None)
+                                                                                                semisup_loss, unsup_loss,
+                                                                                                val_dataloader, model, TASK, classLabels,
+                                                                                                validClasses, SAMPLES_PATH, void=0,
+                                                                                                maskColors=None, save_val_imgs=True)
                 metrics['val_abs_error'].append(val_abs_err)
                 metrics['val_loss'].append(val_loss)
                 metrics['val_rel_error'].append(val_rel_err)
@@ -540,7 +553,8 @@ with mlflow.start_run():
             # get the most recent metric
             mlflow.log_metric(key, value[-1])
 
-    # plot_learning_curves(metrics, EPOCHS, SAMPLES_PATH, TASK)
+    val_epochs = len(metrics['val_loss'])
+    plot_learning_curves(metrics, EPOCHS, val_epochs, SAMPLES_PATH, TASK)
     time_elapsed = time.time() - since
 
     # Since the model was logged as an artifact, it can be loaded to make predictions
@@ -554,10 +568,10 @@ with mlflow.start_run():
                         'test_acc': [],
                         'test_miou': []}
         # test set
-        test_acc, test_loss, test_miou = static_test_single_task(0, criterion, test_dataloader,
-                                                                 loaded_model, TASK, classLabels,
+        test_acc, test_loss, test_miou = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
+                                                                 val_dataloader, model, TASK, classLabels,
                                                                  validClasses, SAMPLES_PATH, void=0,
-                                                                 maskColors=None, save_val_imgs=False)
+                                                                 maskColors=None, save_val_imgs=True)
         metrics_test['test_acc'].append(test_acc)
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_miou'].append(test_miou)
@@ -567,10 +581,10 @@ with mlflow.start_run():
         metrics_test = {'test_loss': [],
                         'test_abs_error': [],
                         'test_rel_error': []}
-        test_rel_error, test_abs_error, test_loss = static_test_single_task(0, criterion, test_dataloader,
-                                                                            loaded_model, TASK, classLabels,
+        test_rel_error, test_abs_error, test_loss = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
+                                                                            val_dataloader, model, TASK, classLabels,
                                                                             validClasses, SAMPLES_PATH, void=0,
-                                                                            maskColors=None, save_val_imgs=None)
+                                                                            maskColors=None, save_val_imgs=True)
         metrics_test['test_abs_error'].append(test_abs_error)
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_rel_error'].append(test_rel_error)

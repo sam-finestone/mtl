@@ -8,7 +8,7 @@ import logging
 # from tensorboardX import SummaryWriter
 # from torchvision.datasets import Cityscapes
 from loader.cityscapes_loader import cityscapesLoader
-from loader.city_loader import staticLoader
+from loader.static_loader import staticLoader
 # from loader.video_dataset import *
 from utils.sort_dataset import *
 # from loader.nyuv2_dataloader import NYUV2
@@ -49,12 +49,12 @@ parser.add_argument('--dataset_std', metavar='[0.229, 0.224, 0.225]',
 #                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for depth run
-parser.add_argument("--config", default='configs/medtronic_cluster/static_cityscape_config_depth',
-                    nargs="?", type=str, help="Configuration file to use")
+# parser.add_argument("--config", default='configs/medtronic_cluster/static_cityscape_config_depth',
+#                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for both tasks
-# parser.add_argument("--config", default='configs/medtronic_cluster/static_cityscape_config_both',
-#                     nargs="?", type=str, help="Configuration file to use")
+parser.add_argument("--config", default='configs/medtronic_cluster/static_cityscape_config_both',
+                    nargs="?", type=str, help="Configuration file to use")
 
 
 args = parser.parse_args()
@@ -84,7 +84,7 @@ input_dim_decoder = 256
 TASK = cfg["model"]["tasks"]
 
 # Initialize mlflow
-NAME_EXPERIMENT = 'experiment_static_' + TASK
+NAME_EXPERIMENT = 'experiment_static_' + TASK 
 # mlflow.set_tracking_uri("http://10.167.61.230:5000")
 # mlflow.set_tracking_uri("https://mlflow-dev.touchsurgery.com")
 # mlflow.set_tracking_uri("https://mlflow-dev-ml-rs-staging.touchsurgery.com")
@@ -219,7 +219,7 @@ if torch.cuda.is_available():
 #   {'params': filter(lambda p: p.requires_grad, last_params)}],
 #   lr=0.00025, momentum=0.9, weight_decay=0.0001)
 # seg was 0.01
-model_opt = optim.Adam(model.parameters(), lr=0.001)
+model_opt = optim.Adam(model.parameters(), lr=1e-4)
 # scheduler = get_scheduler(model_opt, cfg['training']['lr_schedule'])
 # model_opt = torch.optim.SGD(params=model.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-4)
 # model_opt = optim.SGD(model.parameters(), lr=cfg['training']["optimizer"]["lr"], momentum=0.9, weight_decay=0.0001)
@@ -350,7 +350,7 @@ elif TASK == 'depth_segmentation':
     # criterion = torch.nn.MSELoss()
     # criterion = torch.nn.L1Loss()
     # criterion = [InverseDepthL1Loss(), torch.nn.CrossEntropyLoss(ignore_index=train_set.ignore_index)]
-    criterion = [L1LossIgnoredRegion(), torch.nn.CrossEntropyLoss(ignore_index=train_set.ignore_index, reduction='mean')]
+    criterion = [L1LossIgnoredRegion(), torch.nn.CrossEntropyLoss(ignore_index=255, reduction='mean')]
 
 print('Beginning training...')
 with mlflow.start_run():
@@ -508,8 +508,8 @@ with mlflow.start_run():
                                                                                                 TASK, classLabels,
                                                                                                 validClasses,
                                                                                                 SAMPLES_PATH,
-                                                                                                void=0, maskColors=mask_colors,
-                                                                                                args=None)
+                                                                                                void=0, maskColors=None,
+                                                                                                save_val_imgs=True)
                 metrics['val_abs_error'].append(val_abs_err)
                 metrics['val_loss'].append(val_loss)
                 metrics['val_rel_error'].append(val_rel_err)

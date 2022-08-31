@@ -13,7 +13,6 @@ import pdb
 from models.attention.attention import LocalContextAttentionBlock, GlobalContextAttentionBlock
 from models.decoder import SegDecoder, DepthDecoder, MultiDecoder, DecoderTemporal
 from models.decoder import FeatureNoiseDecoder, FeatureDropDecoder, DropOutDecoder
-from models.deeplabv3_encoder import DeepLabv3
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -33,19 +32,15 @@ class TemporalModel(nn.Module):
                 multi_task: (bool) indicating whether task is a single or multi-task setup
     '''
     def __init__(self,
-                 cfg,
+                 encoder_slow, encoder_fast,
                  task, class_tasks, seg_drop_out,
                  window_interval, k, semisup_loss,
                  unsup_loss,
                  version='basic',
                  mulit_task=False):
         super().__init__()
-        _backbone_slow = cfg["model"]["backbone"]["encoder"]["resnet_slow"]
-        _backbone_fast = cfg["model"]["backbone"]["encoder"]["resnet_fast"]
-        self.encoder_slow = DeepLabv3(_backbone_slow)
-        self.encoder_fast = DeepLabv3(_backbone_fast)
-        # self.encoder_slow = encoder_slow
-        # self.encoder_fast = encoder_fast
+        self.encoder_slow = encoder_slow
+        self.encoder_fast = encoder_fast
         self.K = k
         self.version = version
         self.multi_task = mulit_task
@@ -90,21 +85,28 @@ class TemporalModel(nn.Module):
 
         if self.semi_sup:
             # instantiate the different pertubation decoders for the unlabelled data
+            if len(list_kf_indicies) > len(list_non_kf_indicies):
+                if len(list_kf_indicies) > 1:
+                    unlabelled_num_frames = len(list_kf_indicies) + len(list_non_kf_indicies) - 1
+                else:
+                    unlabelled_num_frames = len(list_non_kf_indicies)
+            else:
+                if len(list_non_kf_indicies) > 1:
+                    unlabelled_num_frames = len(list_kf_indicies) + len(list_non_kf_indicies) - 1
+                else:
+                    unlabelled_num_frames = len(list_kf_indicies)
+
             input_dim_decoder = 256
             input_dim = 256
-            if len(list_kf_indicies) > len(list_non_kf_indicies):
-                self.index_of_labelled_frame = len(list_kf_indicies) - 1
-            else:
-                self.index_of_labelled_frame = len(list_kf_indicies) + len(list_non_kf_indicies) - 1
-            # feature_drop = [FeatureDropDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)]
-            feature_noise = [FeatureNoiseDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d, uniform_range=0.3)]
-            drop_decoder = [DropOutDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d, drop_rate=0.3,
-                                          spatial_dropout=True)]
-            # self.aux_decoder = nn.ModuleList([*drop_decoder, *feature_noise, *feature_drop])
-            self.aux_decoder = nn.ModuleList([*drop_decoder, *feature_noise])
-            # self.convnet_fusion_layer2 = nn.Conv3d(input_dim_decoder, 256, kernel_size=(unlabelled_num_frames, 1, 1),
-            #                                        stride=1)
-            # self.se_layer_2 = SE_Layer(input_dim_decoder, 2)
+            feature_drop = FeatureDropDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
+            feature_noise = FeatureNoiseDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d,
+                                                uniform_range=0.3)
+            drop_decoder = DropOutDecoder(input_dim, class_tasks, seg_drop_out, SynchronizedBatchNorm1d, drop_rate=0.3,
+                                          spatial_dropout=True)
+            self.aux_decoder = [drop_decoder, feature_noise, feature_drop]
+            self.convnet_fusion_layer2 = nn.Conv3d(input_dim_decoder, 256, kernel_size=(unlabelled_num_frames, 1, 1),
+                                                   stride=1)
+            self.se_layer_2 = SE_Layer(input_dim_decoder, 2)
 
         # Allocate the appropriate decoder for single task
         if task == 'segmentation':
@@ -112,36 +114,30 @@ class TemporalModel(nn.Module):
             if version == 'conv3d_fusion':
                 input_dim_decoder = 256  # T dimension - but here its the number of keyframes + last fast frame
                 self.task_decoder = DecoderTemporal(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm3d)
-            if version == 'global_atten_fusion':
-                self.task_decoder = SegDecoder(512, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
 
         if task == 'depth':
             self.task_decoder = DepthDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
             if version == 'conv3d_fusion':
                 input_dim_decoder = 256  # T dimension - but here its the number of keyframes + last fast frame
                 self.task_decoder = DecoderTemporal(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm3d)
-            if version == 'global_atten_fusion':
-                self.task_decoder = DepthDecoder(512, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
+
         # Set up the appropriate multi-task decoder for multi-task
         elif task == 'depth_segmentation':
             depth_class = class_tasks[0]
             seg_class = class_tasks[1]
             # self.task_decoder = MultiDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
-            depth_dec = [DepthDecoder(input_dim_decoder, depth_class, seg_drop_out, SynchronizedBatchNorm1d)]
-            seg_depth = [SegDecoder(input_dim_decoder, seg_class, seg_drop_out, SynchronizedBatchNorm1d)]
-            self.list_decoders = nn.ModuleList([*depth_dec, *seg_depth])
+            self.task_decoder = [DepthDecoder(input_dim_decoder, depth_class, seg_drop_out, SynchronizedBatchNorm1d),
+                                 SegDecoder(input_dim_decoder, seg_class, seg_drop_out, SynchronizedBatchNorm1d)]
 
             if version == 'conv3d_fusion':
                 input_dim_decoder = 256  # T dimension - but here its the number of keyframes + last fast frame
-                depth_dec = [DecoderTemporal(input_dim_decoder, depth_class, seg_drop_out, SynchronizedBatchNorm1d)]
-                seg_depth = [DecoderTemporal(input_dim_decoder, seg_class, seg_drop_out, SynchronizedBatchNorm1d)]
-                self.list_decoders = nn.ModuleList([*depth_dec, *seg_depth])
-
+                self.task_decoder = [DecoderTemporal(input_dim_decoder, depth_class, seg_drop_out, SynchronizedBatchNorm3d),
+                                     DecoderTemporal(input_dim_decoder, seg_class, seg_drop_out, SynchronizedBatchNorm3d)]
 
     def forward(self, input):
         # [b, t, c, h, w]
         # Get the keyframes and non-keyframes for slow/fast setting
-        print('input shape: ' + str(input.shape))  # - torch.Size([4, 5, 3, 128, 256])
+        print('input shape: ' + str(input.shape)) # - torch.Size([4, 5, 3, 128, 256])
         keyframes, non_keyframes, list_kf_indicies, list_non_kf_indicies = self.get_keyframes(input)
 
         # check if we are to using regularise the encoders then need the output of all frames in encoders
@@ -166,12 +162,8 @@ class TemporalModel(nn.Module):
         #     task_predictions = self.local_attention_fusion(output_slow, output_fast, list_kf_indicies,
         #                                                    list_non_kf_indicies, mulit_task=self.multi_task)
         # last frame is a keyframe frame (slow encoded)
-        if self.semi_sup['Mode']:
-            all_encoded_frames = torch.cat([output_slow, output_fast], dim=1)
-        index_of_labelled_frame = 0
         annotated_frame = {'last_frame': [], 'type': []}
         if max(list_kf_indicies) > max(list_non_kf_indicies):
-            index_of_labelled_frame = len(list_kf_indicies) - 1
             if len(list_kf_indicies) > 1:
                 annotated_frame['last_frame'].append(output_slow[:, -1].unsqueeze(1))
                 annotated_frame['type'].append('slow_frame')
@@ -181,7 +173,6 @@ class TemporalModel(nn.Module):
                 annotated_frame['type'].append('slow_frame')
         # last frame is a keyframe frame (fast encoded)
         else:
-            index_of_labelled_frame = len(list_kf_indicies) + len(list_non_kf_indicies) - 1
             if len(list_non_kf_indicies) > 1:
                 annotated_frame['last_frame'].append(output_fast[:, -1].unsqueeze(1))
                 annotated_frame['type'].append('fast_frame')
@@ -201,18 +192,23 @@ class TemporalModel(nn.Module):
         elif self.version == 'convnet_fusion':
             task_predictions = self.convnet_fusion(output_slow, output_fast, annotated_frame, with_se_block=False, mulit_task=self.multi_task)
 
+        # NEEDS FIXING!!!!!
         if self.semi_sup['Mode']:
-            # take all the frames and run them through the main Seg decoder
-            # all_encoded_frames = torch.cat([output_slow, output_fast], dim=1)
+            # get the predictions on the unlabbeled frames labels
+            unlabelled_frame_fusion = torch.cat([output_slow, output_fast], dim=1)
+            print(unlabelled_frame_fusion.shape)
+            # unlabelled_frame_fusion = unlabelled_frame_fusion.permute(0, 2, 1, 3, 4)
+            # unlabelled_frame_fusion = self.convnet_fusion_layer2(unlabelled_frame_fusion)
+            # unlabelled_frame_fusion = unlabelled_frame_fusion.permute(0, 1, 2, 3, 4).squeeze()
             # print(unlabelled_frame_fusion.shape)
             # unlabelled_pred will be a list of segmented outputs
-            main_labelled_pred, main_unlabelled_pred, perturbed_unlabelled_pred = self.run_perturbed_decoders(all_encoded_frames, index_of_labelled_frame)
+            unlabelled_preds = self.run_perturbed_decoders(unlabelled_frame_fusion)
 
         # Output based on model choice
         if self.semi_sup['Mode'] and self.unsup['Mode']:
-            return {'supervised': task_predictions, 'semi_supervised': [main_labelled_pred, main_unlabelled_pred, perturbed_unlabelled_pred], 'encoded_slow': x_slow_all, 'encoded_fast': x_fast_all}
+            return {'supervised': task_predictions, 'semi_supervised': unlabelled_preds, 'encoded_slow': x_slow_all, 'encoded_fast': x_fast_all}
         elif self.semi_sup['Mode'] and not self.unsup['Mode']:
-            return {'supervised': task_predictions, 'semi_supervised': [main_labelled_pred, main_unlabelled_pred, perturbed_unlabelled_pred]}
+            return {'supervised': task_predictions, 'semi_supervised': unlabelled_preds}
         elif not self.semi_sup['Mode'] and self.unsup['Mode']:
             return {'supervised': task_predictions, 'encoded_slow': x_slow_all, 'encoded_fast': x_fast_all}
         else:
@@ -242,7 +238,6 @@ class TemporalModel(nn.Module):
         if not mulit_task:
             #  depth decoder or segmentation decoder
             task_predictions = self.task_decoder(x_fusion)
-            task_predictions = task_predictions.squeeze(1)
         else:
             # pass the average fusion to segmentation but not depth
             depth_pred = self.list_decoders[0](annotated_frame)
@@ -344,7 +339,6 @@ class TemporalModel(nn.Module):
             seg_pred = seg_pred.squeeze(1)
             task_predictions = [depth_pred, seg_pred]
         return task_predictions
-
     # local attention if time permits, but does not work
     def local_attention_fusion(self, output_slow, output_fast, mulit_task=False):
         # take the slow output of the keyframes and the last frame of the fast
@@ -386,38 +380,48 @@ class TemporalModel(nn.Module):
                 task_predictions.append(task_pred)
         return task_predictions
 
-    def reshape_input(self, tensor_input):
-        frame_batch_dim = tensor_input.shape[0]
-        frames_t_dim = tensor_input.shape[1]
+    def run_perturbed_decoders(self, unlabeled_frames):
+        # Reshape the unlabeled_frames
+        frame_batch_dim = unlabeled_frames.shape[0]
+        frames_t_dim = unlabeled_frames.shape[1]
         frame_2d_batch = frame_batch_dim * frames_t_dim
-        tensor_input = torch.reshape(tensor_input, (frame_2d_batch, tensor_input.shape[2],
-                                                                         tensor_input.shape[3],
-                                                                         tensor_input.shape[4]))
-        return tensor_input, frame_batch_dim, frames_t_dim
-
-    #  labelled_pred, unlabelled_preds = self.run_perturbed_decoders(all_encoded_frames)
-    def run_perturbed_decoders(self, all_encoded_frames, index_of_labelled_frame):
-        # Reshape all the labelled frames
-        all_encoded_frames_reshaped, all_frame_batch, all_frame_t = self.reshape_input(all_encoded_frames)
-        list_of_unlabelled_frames = [x for x in range(all_frame_t) if x != index_of_labelled_frame]
-        unlabelled_encoded_frames = all_encoded_frames[:, list_of_unlabelled_frames]
-        unlabelled_encoded_frames, frame_batch, unlabelled_t_dim = self.reshape_input(unlabelled_encoded_frames)
-
-        # run through main decoder
-        output_main = self.task_decoder(all_encoded_frames_reshaped)
-        output_main = self.reshape_output(output_main, all_frame_batch, all_frame_t)
-        main_unlabelled_pred = output_main[:, list_of_unlabelled_frames]
-        main_labelled_pred = output_main[:, index_of_labelled_frame]
-        # get unlabelled frames
+        unlabeled_frames = torch.reshape(unlabeled_frames, (frame_2d_batch, unlabeled_frames.shape[2],
+                                                            unlabeled_frames.shape[3],
+                                                            unlabeled_frames.shape[4]))
         # task predictions for each set or unlabelled frames
-        perturbed_unlabelled_pred = []
+        task_predictions = []
         for decoder in self.aux_decoder:
             # send the unlabelled frames through each perturbed decoders to create 3 sets of
-            output = decoder(unlabelled_encoded_frames)
-            output = output.squeeze(1)
-            output = self.reshape_output(output, frame_batch, unlabelled_t_dim)
-            perturbed_unlabelled_pred.append(output)
-        return main_labelled_pred, main_unlabelled_pred, perturbed_unlabelled_pred
+            output = decoder(unlabeled_frames)
+            output = self.reshape_output(output, frame_batch_dim, frames_t_dim)
+            task_predictions.append(output)
+        return task_predictions
+
+        # run  [aux_decoder(x_ul, output_ul.detach()) for aux_decoder in self.aux_decoders]
+
+
+
+    def adverserial_concatentation(self, input, mulit_task=False):
+        keyframes, non_keyframes, list_kf_indicies, list_non_kf_indicies = self.get_keyframes(input)
+        # print(input.shape) - torch.Size([4, 5, 3, 128, 256])
+        x_slow_all, batch_size, t_dim_slow = self.run_encoder(input, self.encoder_slow)
+        x_fast_all, _, t_dim_fast = self.run_encoder(input, self.encoder_fast)
+        # print(x_fast_all.shape) - torch.Size([10, 256, 8, 16])
+        # print(x_slow_all.shape) - torch.Size([10, 2, 8, 16])
+        # apply masks to x_slow_all and x_fast_all and put representations into correct keyframe and frames
+        # only take the last frame before segmentation + the first keyframe
+        # print(x_slow_all[:, list_kf_indicies].shape)
+        # print(x_fast_all[:, list_non_kf_indicies][-1].shape)
+        fast_last_frame = x_fast_all[:, list_non_kf_indicies][-1].tile((x_slow_all[:, list_kf_indicies].shape[0], 1, 1, 1))
+        x_fused = torch.cat([x_slow_all[:, list_kf_indicies], fast_last_frame], dim=1)
+        if not mulit_task:
+            task_decoder = self.list_decoders[-1]
+            task_predictions = task_decoder(x_fused)
+        # x_fusion = self.fusion_network(x_fused)
+        # y = self.decoder(x_fusion)
+        # return y, x_slow_all, x_fast_all
+        # output_fast_unsqueezed = torch.unsqueeze(output_fast[:, -1], dim=1)
+        return task_predictions
 
     def get_keyframes(self, input):
         # input size dimension - [B, T, C, H, W]
@@ -428,6 +432,16 @@ class TemporalModel(nn.Module):
         keyframes = input[:, list_kf_indicies, :, :, :]
         non_keyframes = input[:, list_non_kf_indicies, :, :, :]
         return keyframes, non_keyframes, list_kf_indicies, list_non_kf_indicies
+
+    # def get_keyframes(self, input):
+    #     # input size dimension - [B, T, C, H, W]
+    #     # create keyframes and non-keyframes using K
+    #     T = input.shape[1]
+    #     list_kf_indicies = [x for x in range(T) if x % self.K == 0]
+    #     list_non_kf_indicies = list(set(range(T)) - set(list_kf_indicies))
+    #     keyframes = input[:, list_kf_indicies, :, :, :]
+    #     non_keyframes = input[:, list_non_kf_indicies, :, :, :]
+    #     return keyframes, non_keyframes
 
     def keyframes(self, input):
         T = input.shape[1]
@@ -467,6 +481,17 @@ class TemporalModel(nn.Module):
                                        input.shape[2], input.shape[3]))
         return output
 
+    # function to log the weights of the model
+    def log_weights(self, step):
+        # log the weights of the encoder
+        writer.add_histogram("weights/MILADecoder/conv1/weight", model.conv1.weight.data, step)
+        writer.add_histogram("weights/MILADecoder/conv1/bias", model.conv1.bias.data, step)
+        writer.add_histogram("weights/MILADecoder/conv2/weight", model.conv2.weight.data, step)
+        writer.add_histogram("weights/MILADecoder/conv2/bias", model.conv2.bias.data, step)
+        writer.add_histogram("weights/MILADecoder/fc1/weight", model.fc1.weight.data, step)
+        writer.add_histogram("weights/MILADecoder/fc1/bias", model.fc1.bias.data, step)
+        writer.add_histogram("weights/MILADecoder/fc2/weight", model.fc2.weight.data, step)
+        writer.add_histogram("weights/MILADecoder/fc2/bias", model.fc2.bias.data, step)
 
 class SE_Layer(nn.Module):
     def __init__(self, channel, reduction=16):
