@@ -1,8 +1,8 @@
 import logging
 import torch
 import functools
-from loss.loss import model_fit, DiceLoss, DiceBCELoss, InverseDepthL1Loss
-
+from loss.loss import model_fit, DiceLoss, DiceBCELoss, InverseDepthL1Loss, L1LossIgnoredRegion, InverseDepthL1Loss2
+from loss.loss import consistency_weight, softmax_mse_loss, softmax_kl_loss, softmax_js_loss
 # from ptsemseg.loss.loss import (
 #     SegmentationLosses,
 #     OhemCELoss2D,
