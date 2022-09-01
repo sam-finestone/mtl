@@ -54,16 +54,16 @@ parser.add_argument('-semisup', '--semisup', default=False, type=bool,
 parser.add_argument('-v', '--version', default='sum_fusion', type=str,
                     help='Adding the fusion method')
 # uncomment for segmentation run
-# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
-#                     nargs="?", type=str, help="Configuration file to use")
+parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
+                    nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for depth run
 # parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_depth',
 #                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for both tasks
-parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
-                    nargs="?", type=str, help="Configuration file to use")
+# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
+#                     nargs="?", type=str, help="Configuration file to use")
 
 args = parser.parse_args()
 with open(args.config) as fp:
@@ -178,12 +178,12 @@ deeplabv3_backbone_fast = cfg["model"]["backbone"]["encoder"]["resnet_fast"]
 
 # initialise decoders (one for each task)
 drop_out = cfg["model"]["dropout"]
-
+version = 'sum_fusion'
 # version = 'convnet_fusion'
 # version = 'global_atten_fusion'
 # version = 'conv3d_fusion'
 # version = 'sum_fusion'
-version = 'causal_fusion'
+# version = 'causal_fusion'
 # unsup_ = False
 # semi_sup_ = False
 # mulit_task_ = False
