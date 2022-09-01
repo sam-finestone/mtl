@@ -117,10 +117,8 @@ def static_single_task_trainer(epoch, criterion, semisup_loss, unsup_loss, train
 
         if task == 'depth':
             task_pred = output['supervised']
-            # print(task_pred.type)
-            # print(gt_depth.type)
-            print(task_pred.shape)
-            print(gt_depth.shape)
+            task_pred = task_pred.unsqueeze(1)
+            gt_depth = gt_depth[:, -1]
             sup_loss = criterion(task_pred, gt_depth)
             total_loss = sup_loss + loss_semi_sup + loss_unsup
             total_loss.backward()
@@ -140,7 +138,9 @@ def static_single_task_trainer(epoch, criterion, semisup_loss, unsup_loss, train
         if task == 'depth_segmentation':
             # depth_pred, seg_pred = model(inputs)
             depth_pred = output['supervised'][0]
-            seg_pred = output['supervised'][1]
+            depth_pred = depth_pred.unsqueeze(1)  # [8, 1, 128, 256]
+            seg_pred = output['supervised'][1]  # [8, 19, 128, 256]
+            gt_depth = gt_depth[:, -1]
             seg_loss = criterion[1](seg_pred, gt_semantic_labels)
             depth_loss = criterion[0](depth_pred, gt_depth)
 
@@ -153,10 +153,10 @@ def static_single_task_trainer(epoch, criterion, semisup_loss, unsup_loss, train
             model_opt.step()
 
             # Get seg metrics
-            task_pred = seg_pred.detach().max(dim=1)[1].cpu().numpy()
+            seg_pred = seg_pred.detach().max(dim=1)[1].cpu().numpy()
             gt_semantic_labels = gt_semantic_labels.cpu().numpy()
             # loss = criterion(task_pred, gt_semantic_labels.squeeze())
-            metrics.update(gt_semantic_labels, task_pred)
+            metrics.update(gt_semantic_labels, seg_pred)
             curr_mean_acc = metrics.get_results()['Mean Acc']
             curr_mean_iou = metrics.get_results()['Mean IoU']
 
@@ -170,7 +170,7 @@ def static_single_task_trainer(epoch, criterion, semisup_loss, unsup_loss, train
 
             # get depth metric
             # abs_err, rel_err = depth_error(depth_pred, gt_depth)
-            abs_err, rel_err = depth_error2(task_pred, gt_depth)
+            abs_err, rel_err = depth_error2(depth_pred, gt_depth)
             abs_error_running.update(abs_err)
             rel_error_running.update(rel_err)
 
@@ -201,8 +201,7 @@ def static_single_task_trainer(epoch, criterion, semisup_loss, unsup_loss, train
         return loss_running.avg, mean_acc, mean_miou
     return loss_running.avg, abs_error_running.avg, rel_error_running.avg, mean_acc, mean_miou
 
-def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loader, single_task_model, task, classLabels, validClasses,
-                            folder, void=0, maskColors=None, save_val_imgs=None):
+def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loader, single_task_model, task, folder, cfg, save_val_imgs=None):
     # evaluating test data
     # SAMPLES_PATH
     batch_time = AverageMeter('Time', ':6.3f')
@@ -256,7 +255,7 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 # Compute semi supervised loss
                 loss_semi_sup = sum([semisup_loss['Function'](inputs=u, targets=main_pred_task, conf_mask=False,
                                                               threshold=0.5, use_softmax=False) for u in
-                                     perturbed_unlabelled_pred])
+                                                              perturbed_unlabelled_pred])
                 loss_semi_sup = (loss_semi_sup / len(perturbed_unlabelled_pred))
                 weight_u = semisup_loss['Weights'](epoch=semisup_loss['Epochs'], curr_iter=epoch)
                 loss_semi_sup = loss_semi_sup * weight_u
@@ -281,15 +280,18 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 loss_running.update(total_loss, bs)
 
                 # Save visualizations of first batch
-                if batch_idx == 0 and save_val_imgs is not None:
+                if save_val_imgs is not None and batch_idx == 0:
                     # get the images from the T dimension that have predicitons on them so last frame in T
                     inputs = inputs[:, -1]
-                    img_id = save_val_results_seg(inputs, gt_semantic_labels, task_pred, img_id, test_loader, folder)
+                    filepath = filepath[-1]  # this gets the batch of labelled images with annotations
+                    save_val_results_seg(inputs, gt_semantic_labels, task_pred, test_loader, folder, filepath, epoch)
 
             if task == 'depth':
                 # print(task_pred.shape)
                 # print(gt_depth.shape)
+                gt_depth = gt_depth[:, -1] # get the last frame
                 task_pred = output['supervised']
+                task_pred = task_pred.unsqueeze(1)
                 sup_loss = criterion(task_pred, gt_depth)
                 total_loss = sup_loss + loss_semi_sup + loss_unsup
                 bs = inputs.size(0)  # current batch size
@@ -301,17 +303,22 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 rel_error_running.update(rel_err)
 
                 # Save visualizations of first batch
-                if batch_idx == 0 and epoch == 5:
-                    imgs = inputs.data.cpu().numpy()
-                    gt_depth_ = gt_depth.data.cpu().numpy()
-                    pred_depth_ = task_pred.data.cpu().numpy()
-                    for i in range(inputs.size(0)):
-                        filename = filepath[i]
-                        save_visualization_depth(i, imgs, pred_depth_, gt_depth_, filename, folder)
+                if save_val_imgs is not None and batch_idx == 0:
+                    inputs_annotated = inputs[:, -1]
+                    filepath = filepath[-1]
+                    save_visualization_depth(inputs_annotated, task_pred, gt_depth, filepath, folder, epoch)
+                    # imgs = inputs.data.cpu().numpy()
+                    # gt_depth_ = gt_depth.data.cpu().numpy()
+                    # pred_depth_ = task_pred.data.cpu().numpy()
+                    # for i in range(inputs.size(0)):
+                    #     filename = filepath[i]
+                    #     save_visualization_depth(i, imgs, pred_depth_, gt_depth_, filename, folder)
 
         if task == 'depth_segmentation':
                 depth_pred = output['supervised'][0]
+                depth_pred = depth_pred.unsqueeze(1)
                 seg_pred = output['supervised'][1]
+                gt_depth = gt_depth[:, -1]  # get the last frame
                 # depth_pred, seg_pred = single_task_model(inputs)
                 seg_loss = criterion[1](seg_pred, gt_semantic_labels)
                 depth_loss = criterion[0](depth_pred, gt_depth)
@@ -321,9 +328,10 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 seg_weight = 0.5
                 sup_loss = (depth_weight * depth_loss) + (seg_loss * seg_weight)
                 total_loss = sup_loss + loss_semi_sup + loss_unsup
-                task_pred = task_pred.detach().max(dim=1)[1].cpu().numpy()
+
+                seg_pred = seg_pred.detach().max(dim=1)[1].cpu().numpy()
                 gt_semantic_labels = gt_semantic_labels.cpu().numpy()
-                metrics.update(gt_semantic_labels, task_pred)
+                metrics.update(gt_semantic_labels, seg_pred)
 
                 bs = inputs.size(0)  # current batch size
                 loss = total_loss.item()
@@ -335,13 +343,16 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
 
                 # Save visualizations of first batch
                 if batch_idx == 0 and save_val_imgs is not None:
-                    img_id = save_val_results_seg(inputs, gt_semantic_labels, task_pred, img_id, test_loader, folder)
-                    imgs = inputs.data.cpu().numpy()
-                    gt_depth_ = gt_depth.data.cpu().numpy()
-                    pred_depth_ = depth_pred.data.cpu().numpy()
-                    for i in range(inputs.size(0)):
-                        filename = filepath[i]
-                        save_visualization_depth(i, imgs, pred_depth_, gt_depth_, filename, folder)
+                    inputs = inputs[:, -1]
+                    filepath = filepath[-1]  # this gets the batch of labelled images with annotations
+                    save_val_results_seg(inputs, gt_semantic_labels, task_pred, test_loader, folder, filepath, epoch)
+                    save_visualization_depth(inputs_annotated, task_pred, gt_depth, filepath, folder, epoch)
+                    # imgs = inputs.data.cpu().numpy()
+                    # gt_depth_ = gt_depth.data.cpu().numpy()
+                    # pred_depth_ = depth_pred.data.cpu().numpy()
+                    # for i in range(inputs.size(0)):
+                    #     filename = filepath[i]
+                    #     save_visualization_depth(i, imgs, pred_depth_, gt_depth_, filename, folder)
 
         batch_time.update(time.time() - end)
         end = time.time()
@@ -383,20 +394,20 @@ def lin_interp(shape, xyd):
     disparity = f(IJ).reshape(shape)
     return disparity
 
-def save_val_results_seg(images, gt_semantic_labels, task_pred, img_id, loader, img_save_path):
+def save_val_results_seg(images, gt_semantic_labels, task_pred, loader, img_save_path, filename, epoch):
     denorm = Denormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     for i in range(len(images)):
         image = images[i].detach().cpu().numpy()
         target = gt_semantic_labels[i]
         pred = task_pred[i]
-
+        file = filename[i]
         image = (denorm(image) * 255).transpose(1, 2, 0).astype(np.uint8)
         target = loader.dataset.decode_target(target).astype(np.uint8)
         pred = loader.dataset.decode_target(pred).astype(np.uint8)
 
-        Image.fromarray(image).save(os.path.join(img_save_path, '%d_image.png' % img_id))
-        Image.fromarray(target).save(os.path.join(img_save_path, '%d_target.png' % img_id))
-        Image.fromarray(pred).save(os.path.join(img_save_path, '%d_pred.png' % img_id))
+        Image.fromarray(image).save(img_save_path + '/images/{}_epoch_{}_img_seg.png'.format(file, epoch))
+        Image.fromarray(target).save(img_save_path + '/images/{}_epoch_{}_target_seg.png'.format(file, epoch))
+        Image.fromarray(pred).save(img_save_path + '/images/{}_epoch_{}_pred_seg.png'.format(file, epoch))
 
         fig = plt.figure()
         plt.imshow(image)
@@ -405,10 +416,8 @@ def save_val_results_seg(images, gt_semantic_labels, task_pred, img_id, loader, 
         ax = plt.gca()
         ax.xaxis.set_major_locator(matplotlib.ticker.NullLocator())
         ax.yaxis.set_major_locator(matplotlib.ticker.NullLocator())
-        plt.savefig(os.path.join(img_save_path, '%d_overlay.png' % img_id), bbox_inches='tight', pad_inches=0)
+        plt.savefig(img_save_path + '/images/{}_epoch_{}_overlay_seg.png'.format(file, epoch), bbox_inches='tight', pad_inches=0)
         plt.close()
-        img_id += 1
-    return img_id
 
 def save_visualization_segmentation(index, epoch, imgs, seg_pred, gt_semantic_labels, maskColors, filename, folder):
     denorm = Denormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -426,25 +435,56 @@ def save_visualization_segmentation(index, epoch, imgs, seg_pred, gt_semantic_la
     mlflow.log_artifact(folder + '/images/{}_epoch_{}_gt.png'.format(filename, epoch))
     mlflow.log_artifact(folder + '/images/{}_epoch_{}_pred.png'.format(filename, epoch))
 
-def save_visualization_depth(index, imgs, pred_depth_, gt_depth_, filename, folder):
+# def save_visualization_depth(index, imgs, pred_depth_, gt_depth_, filename, folder):
+#     denorm = Denormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+#     # img_input = np.transpose(imgs[index], (1, 2, 0))
+#     img_input = (denorm(imgs[index]) * 255).transpose(1, 2, 0).astype(np.uint8)
+#     # pred_target = pred_depth_[index][0] / 255
+#     pred_target = pred_depth_[index][0].squeeze()
+#     # img_gt = gt_depth_[index][0] / 255
+#     img_gt = gt_depth_[index][0]
+#     fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
+#     plt.figure(figsize=(10, 10))
+#     axs1.imshow(img_input)
+#     axs2.imshow(pred_target)
+#     plt.title("Disparity prediction", fontsize=22)
+#     axs2.axis('off')
+#     axs3.imshow(img_gt)
+#     plt.title("Disparity actual", fontsize=22)
+#     fig.savefig(folder + '/images/{}.png'.format(filename + '_image_' + str(index)))
+#     mlflow.log_artifact(folder + '/images/{}.png'.format(filename + '_image_' + str(index)))
+#     plt.close(fig)
+def save_visualization_depth(inputs, task_pred, gt_depth, filepath, img_save_path, epoch):
     denorm = Denormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    # img_input = np.transpose(imgs[index], (1, 2, 0))
-    img_input = (denorm(imgs[index]) * 255).transpose(1, 2, 0).astype(np.uint8)
-    # pred_target = pred_depth_[index][0] / 255
-    pred_target = pred_depth_[index][0].squeeze()
-    # img_gt = gt_depth_[index][0] / 255
-    img_gt = gt_depth_[index][0]
-    fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
-    plt.figure(figsize=(10, 10))
-    axs1.imshow(img_input)
-    axs2.imshow(pred_target)
-    plt.title("Disparity prediction", fontsize=22)
-    axs2.axis('off')
-    axs3.imshow(img_gt)
-    plt.title("Disparity actual", fontsize=22)
-    fig.savefig(folder + '/images/{}.png'.format(filename + '_image_' + str(index)))
-    mlflow.log_artifact(folder + '/images/{}.png'.format(filename + '_image_' + str(index)))
-    plt.close(fig)
+    # print(task_pred.shape)
+    # print(gt_depth.shape)
+    gt_depth = gt_depth.data.cpu().numpy()
+    task_pred = task_pred.data.cpu().numpy()
+    for i in range(len(inputs)):
+        image = inputs[i].detach().cpu().numpy()
+        # target = gt_depth[i].transpose(1, 2, 0)# [128,256,1]
+        # pred = task_pred[i].transpose(1, 2, 0)# [128,256,1]
+        target = gt_depth[i].squeeze() #  [128,256]
+        pred = task_pred[i].squeeze()  #  [128,256]
+        file = filepath[i]
+        image = (denorm(image) * 255).transpose(1, 2, 0).astype(np.uint8)
+        fig, (axs1, axs2, axs3) = plt.subplots(3, sharex=False, sharey=False)
+        plt.figure(figsize=(10, 10))
+        axs1.imshow(image)
+        axs2.imshow(pred)
+        plt.title("Disparity prediction", fontsize=22)
+        axs2.axis('off')
+        axs3.imshow(target)
+        plt.title("Disparity actual", fontsize=22)
+        fig.savefig(img_save_path + '/images/{}_epoch_{}_depth.png'.format(file, epoch))
+        mlflow.log_artifact(img_save_path + '/images/{}_epoch_{}_depth.png'.format(file, epoch))
+        # plt.close(fig)
+        # Image.fromarray(image).save(img_save_path + '/images/{}_epoch_{}_img_depth.png'.format(file, epoch))
+        # cv2.imwrite(img_save_path + '/images/{}_epoch_{}_target_depth.png'.format(file, epoch), target)
+        # cv2.imwrite(img_save_path + '/images/{}_epoch_{}_pred_depth.png'.format(file, epoch), pred)
+        # Image.fromarray(target).save(img_save_path + '/images/{}_epoch_{}_target_depth.png'.format(file, epoch))
+        # Image.fromarray(pred).save(img_save_path + '/images/{}_epoch_{}_pred_depth.png'.format(file, epoch))
+
 
 def save_ckpt(path, model, optimizer, scheduler, metrics, best_score, epoch):
     """ save current model

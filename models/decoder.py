@@ -134,10 +134,10 @@ class DecoderTemporal(nn.Module):
         self.bn1 = BatchNorm(mid_input_dim)
         self.relu = nn.ReLU()
         self.last_conv = nn.Sequential(
-            nn.Conv3d(mid_input_dim, mid_input_dim, kernel_size=(3, 3, 3), stride=1, padding=1, bias=False),
-            BatchNorm(mid_input_dim),
-            nn.ReLU(),
-            nn.Dropout(drop_out),
+            # nn.Conv3d(mid_input_dim, mid_input_dim, kernel_size=(3, 3, 3), stride=1, padding=1, bias=False),
+            # BatchNorm(mid_input_dim),
+            # nn.ReLU(),
+            # nn.Dropout(drop_out),
             nn.Conv3d(mid_input_dim, mid_input_dim, kernel_size=(3, 3, 3), stride=1, padding=1, bias=False),
             BatchNorm(mid_input_dim),
             nn.ReLU(),
@@ -240,5 +240,29 @@ class FeatureNoiseDecoder(nn.Module):
         return x
 
 
+class CausalConv3d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=(2, 3, 3), dilation=(1, 1, 1), bias=False):
+        super().__init__()
+        assert len(kernel_size) == 3, 'kernel_size must be a 3-tuple.'
+        time_pad = (kernel_size[0] - 1) * dilation[0]
+        height_pad = ((kernel_size[1] - 1) * dilation[1]) // 2
+        width_pad = ((kernel_size[2] - 1) * dilation[2]) // 2
+
+        # Pad temporally on the left
+        self.pad = nn.ConstantPad3d(padding=(width_pad, width_pad, height_pad, height_pad, time_pad, 0), value=0)
+        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size, dilation=dilation, stride=1, padding=0, bias=bias)
+        self.norm = nn.BatchNorm3d(out_channels)
+        self.activation = nn.ReLU(inplace=True)
+
+        w = torch.ones_like(self.conv.weight)
+        self.conv.weight = torch.nn.Parameter(w)
+
+    def forward(self, *inputs):
+        (x,) = inputs
+        x = self.pad(x)
+        x = self.conv(x)
+        x = self.norm(x)
+        x = self.activation(x)
+        return x
 
 

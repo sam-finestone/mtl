@@ -3,4 +3,4 @@ from .deeplabv3_encoder import DeepLabv3
 from .mtl_model import TemporalModel
 from .static_model import StaticTaskModel
 from .attention.attention import LocalContextAttentionBlock
-from .decoder import DropOutDecoder, FeatureDropDecoder, FeatureNoiseDecoder
+from .decoder import DropOutDecoder, FeatureDropDecoder, FeatureNoiseDecoder, CausalConv3d

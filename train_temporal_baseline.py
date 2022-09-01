@@ -47,18 +47,23 @@ parser.add_argument('--dataset_mean', metavar='[0.485, 0.456, 0.406]',
 parser.add_argument('--dataset_std', metavar='[0.229, 0.224, 0.225]',
                     default=[0.229, 0.224, 0.225], type=list,
                     help='std for normalization')
-
+parser.add_argument('-unsup', '--unsup', default=False, type=bool,
+                    help='Bool declaring add unsupervised pathway to network')
+parser.add_argument('-semisup', '--semisup', default=False, type=bool,
+                    help='Bool declaring add semi supervision pathway to network')
+parser.add_argument('-v', '--version', default='sum_fusion', type=str,
+                    help='Adding the fusion method')
 # uncomment for segmentation run
-parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
-                    nargs="?", type=str, help="Configuration file to use")
+# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
+#                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for depth run
 # parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_depth',
 #                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for both tasks
-# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
-#                     nargs="?", type=str, help="Configuration file to use")
+parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
+                    nargs="?", type=str, help="Configuration file to use")
 
 args = parser.parse_args()
 with open(args.config) as fp:
@@ -74,39 +79,29 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print('number of gpu   : {:6d}'.format(num_gpu))
 
 EPOCHS = cfg["training"]["train_iters"]
-# Slow and fast encoder backbone
 BACKBONE = cfg["model"]["backbone"]["encoder"]
-# multi_optim = args.multi
-# use_nesterov = args.nesterov
 DATASET_PATH = cfg["data"]["path"]
 CLASS_TASKS = cfg["model"]["task_classes"]
 frames_per_segment = cfg["model"]["frames_per_segment"]
 window_size = cfg["model"]["window_size"]
 k = cfg["model"]["k"]
-path_n = cfg["model"]["path_num"]
 data_path = cfg["data"]["path"]
 input_dim_decoder = 256
 TASK = cfg["model"]["tasks"]
+# version = cfg["model"]["version"]
+version = args.version
+unsup_ = args.unsup
+semi_sup_ = args.semisup
+
+print('Running experiment on Task: ' + TASK)
+print('Temporal version: ' + version)
+print('Adding unsupervised learning to encoders: ' + str(unsup_))
+print('Adding semi supervision to network: ' + str(semi_sup_))
 
 # Initialize mlflow
 NAME_EXPERIMENT = 'experiment_temporal_' + TASK
 mlflow.set_experiment(experiment_name=NAME_EXPERIMENT)
 
-# train_augmentations = torch.nn.Sequential(transforms.Resize(size=(128, 256)),
-#                                           # transforms.RandomCrop(size=(256, 512)),
-#                                           transforms.RandomHorizontalFlip(p=0.5)
-#                                           # transforms.Normalize(mean=(123.675, 116.28, 103.53),
-#                                           #                      std=(58.395, 57.12, 57.375)),
-#                                           # transforms.Pad(padding=(256, 512))
-#                                           )
-#
-# val_augmentations = torch.nn.Sequential(transforms.Resize(size=(128, 256)),
-#                                         # transforms.RandomCrop(size=(256, 512)),
-#                                         transforms.RandomHorizontalFlip(p=0.5)
-#                                         # transforms.Normalize(mean=(123.675, 116.28, 103.53),
-#                                         #                      std=(58.395, 57.12, 57.375)),
-#                                         # transforms.Pad(padding=(256, 512))
-#                                         )
 train_transform = et.ExtCompose([
             et.ExtResize((128, 256)),
             # et.ExtRandomCrop(size=(opts.crop_size, opts.crop_size)),
@@ -183,16 +178,15 @@ deeplabv3_backbone_fast = cfg["model"]["backbone"]["encoder"]["resnet_fast"]
 
 # initialise decoders (one for each task)
 drop_out = cfg["model"]["dropout"]
-version = cfg["model"]["version"]
 
 # version = 'convnet_fusion'
 # version = 'global_atten_fusion'
 # version = 'conv3d_fusion'
-version = 'average_fusion'
-
-unsup_ = False
-semi_sup_ = False
-mulit_task_ = False
+# version = 'sum_fusion'
+version = 'causal_fusion'
+# unsup_ = False
+# semi_sup_ = False
+# mulit_task_ = False
 
 window_size = 3 
 
@@ -214,6 +208,8 @@ else:
 
 if TASK == 'depth_segmentation':
     mulit_task_ = True
+else:
+    mulit_task_ = False
 
 # initialise multi (or single) - task model
 model = TemporalModel(cfg, TASK, CLASS_TASKS, drop_out,
@@ -232,13 +228,13 @@ scheduler = optim.lr_scheduler.StepLR(model_opt,
 
 # directory name to save the models
 if semi_sup_ and  unsup_:
-    file = TASK + '_semisup_and_unsup_' + str(window_size)
+    file = TASK + '_semisup_and_unsup_'
 elif semi_sup_ and  not unsup_:
-    file = TASK + '_semisup_' + str(window_size)
+    file = TASK + '_semisup_'
 elif not semi_sup_ and unsup_:
-    file = TASK + '_unsup_' + str(window_size)
+    file = TASK + '_unsup_'
 else:
-    file = TASK + str(window_size)
+    file = TASK
 
 MODEL_SAVE_PATH = os.path.join(args.model_save_path, 'Model', 'Checkpoints', 'Temporal', version, file)
 LOG_FILE = os.path.join(args.model_save_path, 'Logs', 'Temporal', version, file)
@@ -257,25 +253,24 @@ if not os.path.exists(LOG_FILE):
 # for each training batch record important metrics
 if TASK == 'segmentation':
     # for each epoch record important metrics
-    with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
-        epoch_log.write('epoch, train loss, val loss, train acc, val acc, miou\n')
+    with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
+        epoch_log.write('epoch, loss, Pix. acc, mIoU \n')
 
     with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as f:
         f.write('Epoch, Batch Index, train loss, train acc\n')
 
 if TASK == 'depth':
     # for each epoch record important metrics
-    with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
-        epoch_log.write('epoch, train loss, val loss, train error, val error\n')
+    with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
+        epoch_log.write('epoch, loss, Abs. error \n')
 
     with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as f:
         f.write('Epoch, Batch Index, train loss, abs_err, rel_err\n')
 
 if TASK == 'depth_segmentation':
     # for each epoch record important metrics
-    with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
-        epoch_log.write('epoch, train loss, train acc, train abs error, train rel error, '
-                        'val loss, val acc, val miou, val abs error, val rel error \n')
+    with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
+        epoch_log.write('epoch, loss, Abs. error, Pix. acc, mIoU \n')
 
     with open(os.path.join(LOG_FILE, 'log_train_batch.txt'), 'a') as f:
         f.write('Epoch, Batch Index, train loss, train acc, train abs error, train rel error \n')
@@ -398,9 +393,8 @@ with mlflow.start_run():
             if epoch % cfg['training']['val_interval'] == 0:
                 print('--- Validation ---')
                 val_acc, val_loss, val_miou = static_test_single_task(epoch, criterion, semisup_loss, unsup_loss,
-                                                                      val_dataloader, model, TASK, classLabels,
-                                                                      validClasses, SAMPLES_PATH, void=0,
-                                                                      maskColors=None, save_val_imgs=True)
+                                                                      val_dataloader, model, TASK, SAMPLES_PATH,
+                                                                      cfg, save_val_imgs=True)
                 metrics['val_acc'].append(val_acc)
                 metrics['val_loss'].append(val_loss)
                 metrics['val_miou'].append(val_miou)
@@ -414,6 +408,9 @@ with mlflow.start_run():
                 print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
                                                                      "pytorch-" + TASK + "-trained"))
 
+                with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
+                    epoch_log.write('Validation: {}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, val_loss,
+                                                                                      val_acc, val_miou))
                 # Save best model to file
                 if val_miou > best_miou:
                     print('mIoU improved from {:.4f} to {:.4f}.'.format(best_miou, val_miou))
@@ -424,10 +421,12 @@ with mlflow.start_run():
                     # print("\nLogging the trained model as a run artifact...")
                     mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-best", pickle_module=pickle)
 
-            # Write segmentation logs
-            with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
-                epoch_log.write('{}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, train_loss, val_loss, train_acc))
-            mlflow.log_artifact(os.path.join(LOG_FILE, 'log_epoch.txt'))
+            # Write segmentation logs epoch, train loss, val loss, train acc, val acc, miou
+
+            with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
+                epoch_log.write('Train: {}, {:.5f}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, train_loss, val_loss,
+                                                                                     train_acc, train_miou))
+            mlflow.log_artifact(os.path.join(LOG_FILE, 'log_results.txt'))
 
 
 
@@ -448,9 +447,8 @@ with mlflow.start_run():
             if epoch % cfg['training']['val_interval'] == 0:
                 print('--- Validation ---')
                 val_rel_error, val_abs_error, val_loss = static_test_single_task(epoch, criterion, semisup_loss, unsup_loss,
-                                                                                 val_dataloader, model, TASK, classLabels,
-                                                                                 validClasses, SAMPLES_PATH, void=0,
-                                                                                 maskColors=None, save_val_imgs=True)
+                                                                                 val_dataloader, model, TASK, SAMPLES_PATH,
+                                                                                 cfg, save_val_imgs=True)
                 metrics['val_abs_error'].append(val_abs_error)
                 metrics['val_loss'].append(val_loss)
                 metrics['val_rel_error'].append(val_rel_error)
@@ -464,6 +462,10 @@ with mlflow.start_run():
                 save_ckpt(path_save_model, model, model_opt, scheduler, metrics, val_abs_error, epoch)
                 print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
                                                                      "pytorch-" + TASK + "-trained"))
+
+                with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
+                    epoch_log.write('Validation: {}, {:.5f}, {:.5f} \n'.format(epoch, val_loss, val_abs_error))
+
                 # Save best model to file
                 if val_abs_error < lowest_depth_error:
                     print('Val error improved from {:.4f} to {:.4f}.'.format(lowest_depth_error, val_abs_error))
@@ -475,11 +477,10 @@ with mlflow.start_run():
                     print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
                                                                          "pytorch-" + TASK + "-best"))
 
-            # Write segmentation logs
-            with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
-                epoch_log.write('{}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f} \n'.format(
-                    epoch, train_loss, val_loss, train_abs_err, val_abs_error, train_rel_err, val_rel_error))
-            mlflow.log_artifact(os.path.join(LOG_FILE, 'log_epoch.txt'))
+            # Write Depth logs
+            with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
+                epoch_log.write('Train: {}, {:.5f}, {:.5f} \n'.format(epoch, train_loss, train_abs_err))
+            mlflow.log_artifact(os.path.join(LOG_FILE, 'log_results.txt'))
 
         elif TASK == 'depth_segmentation':
             train_loss, train_abs_err, train_rel_err, train_acc, train_miou = static_single_task_trainer(epoch,
@@ -507,11 +508,9 @@ with mlflow.start_run():
             # Validate
             if epoch % cfg['training']['val_interval'] == 0:
                 print('--- Validation ---')
-                val_loss, val_abs_err, val_rel_err, val_acc, val_miou = static_test_single_task(epoch, criterion,
-                                                                                                semisup_loss, unsup_loss,
-                                                                                                val_dataloader, model, TASK, classLabels,
-                                                                                                validClasses, SAMPLES_PATH, void=0,
-                                                                                                maskColors=None, save_val_imgs=True)
+                val_loss, val_abs_err, val_rel_err, val_acc, val_miou = static_test_single_task(epoch, criterion, semisup_loss, unsup_loss,
+                                                                                                val_dataloader, model, TASK, SAMPLES_PATH,
+                                                                                                cfg, save_val_imgs=True)
                 metrics['val_abs_error'].append(val_abs_err)
                 metrics['val_loss'].append(val_loss)
                 metrics['val_rel_error'].append(val_rel_err)
@@ -529,6 +528,11 @@ with mlflow.start_run():
                 save_ckpt(path_save_model, model, model_opt, scheduler, metrics, val_miou, epoch)
                 print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
                                                                      "pytorch-" + TASK + "-trained"))
+
+                with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
+                    epoch_log.write('Train: {}, {:.5f}, {:.5f}, {:.5f}, {:.5f} \n'.format(epoch, train_loss,
+                                                                                          val_abs_err,
+                                                                                          val_acc, val_miou))
                 # Save best model to file
                 if val_abs_err < lowest_depth_error and val_miou > best_miou:
                     print('Val error improved from {:.4f} to {:.4f}.'.format(lowest_depth_error, val_abs_err))
@@ -541,12 +545,10 @@ with mlflow.start_run():
                     print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
                                                                          "pytorch-" + TASK + "-best"))
             # Write segmentation logs
-            with open(os.path.join(LOG_FILE, 'log_epoch.txt'), 'a') as epoch_log:
-                epoch_log.write('{}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, {:.5f}, '
-                                '{:.5f}, {:.5f} \n'.format(epoch, train_loss, val_loss, train_abs_err,
-                                                           val_abs_err, train_rel_err, val_rel_err,
-                                                           train_acc, val_acc, train_miou, val_miou))
-            mlflow.log_artifact(os.path.join(LOG_FILE, 'log_epoch.txt'))
+            with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
+                epoch_log.write('Train: {}, {:.5f}, {:.5f}, {:.5f}, {:.5f} \n'.format(epoch, train_loss, train_abs_err,
+                                                                                      train_acc, train_miou))
+            mlflow.log_artifact(os.path.join(LOG_FILE, 'log_results.txt'))
 
         # Track the metrics in mlflow
         for key, value in metrics.items():
@@ -555,6 +557,7 @@ with mlflow.start_run():
 
     val_epochs = len(metrics['val_loss'])
     plot_learning_curves(metrics, EPOCHS, val_epochs, SAMPLES_PATH, TASK)
+    #plot_metrics_curves(metrics, EPOCHS, val_epochs, SAMPLES_PATH, TASK)
     time_elapsed = time.time() - since
 
     # Since the model was logged as an artifact, it can be loaded to make predictions
@@ -569,9 +572,8 @@ with mlflow.start_run():
                         'test_miou': []}
         # test set
         test_acc, test_loss, test_miou = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
-                                                                 val_dataloader, model, TASK, classLabels,
-                                                                 validClasses, SAMPLES_PATH, void=0,
-                                                                 maskColors=None, save_val_imgs=True)
+                                                                 val_dataloader, model, TASK, SAMPLES_PATH,
+                                                                 cfg, save_val_imgs=True)
         metrics_test['test_acc'].append(test_acc)
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_miou'].append(test_miou)
@@ -582,9 +584,8 @@ with mlflow.start_run():
                         'test_abs_error': [],
                         'test_rel_error': []}
         test_rel_error, test_abs_error, test_loss = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
-                                                                            val_dataloader, model, TASK, classLabels,
-                                                                            validClasses, SAMPLES_PATH, void=0,
-                                                                            maskColors=None, save_val_imgs=True)
+                                                                            val_dataloader, model, TASK, SAMPLES_PATH,
+                                                                            cfg, save_val_imgs=True)
         metrics_test['test_abs_error'].append(test_abs_error)
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_rel_error'].append(test_rel_error)
@@ -599,14 +600,9 @@ with mlflow.start_run():
                         'test_rel_error': [],
                         'test_acc': [],
                         'test_miou': []}
-        test_loss, test_abs_error, test_rel_error, test_acc, test_miou = static_test_single_task(0, criterion,
-                                                                                                 test_dataloader,
-                                                                                                 loaded_model, TASK,
-                                                                                                 classLabels,
-                                                                                                 validClasses,
-                                                                                                 SAMPLES_PATH, void=0,
-                                                                                                 maskColors=None,
-                                                                                                 save_val_imgs=None)
+        test_loss, test_abs_error, test_rel_error, test_acc, test_miou = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
+                                                                                                 val_dataloader, model, TASK, SAMPLES_PATH,
+                                                                                                 cfg, save_val_imgs=True)
         metrics_test['test_abs_error'].append(test_abs_error)
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_acc'].append(test_acc)
