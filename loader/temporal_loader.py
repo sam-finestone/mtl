@@ -156,6 +156,7 @@ class temporalLoader(data.Dataset):
 
         self.files[split] = recursive_glob(rootdir=self.images_base, suffix=".png")
         self.seg_files[split] = recursive_glob_set(rootdir=self.images_base, suffix=".png")
+
         # print(self.files['train'][:50])
         # print(self.seg_files['train'])
         self.void_classes = [0, 1, 2, 3, 4, 5, 6, 9, 10, 14, 15, 16, 18, 29, 30, -1]
@@ -203,11 +204,13 @@ class temporalLoader(data.Dataset):
         ]
         self.depth_transform_train = transforms.Compose([
             transforms.Resize((128, 256)),
-            transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
+            # transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
             transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
         ])
         self.depth_transform_val = transforms.Compose([
             transforms.Resize((128, 256)),
+            transforms.ToTensor()
         ])
         self.image_transform_train = transforms.Compose([
             transforms.Resize((128, 256)),
@@ -315,14 +318,17 @@ class temporalLoader(data.Dataset):
             images.append(image)
             # images = torch.stack(image, dim=0)
 
-            depth = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
-            disparity = torch.from_numpy(self.map_disparity(depth)).unsqueeze(0).float()
-            depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+            depth_path = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED).astype(np.float32)
+            depth_img = Image.fromarray(depth_path)
+            # disparity = torch.from_numpy(self.map_disparity(depth)).unsqueeze(0).float()
+            # depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
             if self.split == 'train':
-                depth_labels = self.depth_transform_train(depth_normalized)
+                depth_labels = self.depth_transform_train(depth_img)
+                depth_normalized = self.map_disparity(depth_labels.float()).float()
             else:
-                depth_labels = self.depth_transform_val(depth_normalized)
-            depth_lbl.append(depth_labels)
+                depth_labels = self.depth_transform_val(depth_img)
+                depth_normalized = self.map_disparity(depth_labels.float()).float()
+            depth_lbl.append(depth_normalized)
 
         # segmentation_labels = torch.stack(segmentation_labels, dim=0)
         depth_labels = torch.stack(depth_lbl, dim=0)

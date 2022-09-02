@@ -15,6 +15,7 @@ from utils.sort_dataset import *
 # from loader.nyuv2_dataloader import NYUV2
 from models.decoder import SegDecoder, DepthDecoder, MultiDecoder, DecoderTemporal
 from models.mtl_model import TemporalModel
+from models.single_backbone_temporal import TemporalModel2
 from models.static_model import StaticTaskModel
 from models.deeplabv3_encoder import DeepLabv3
 from utils.train_helpers import *
@@ -54,16 +55,16 @@ parser.add_argument('-semisup', '--semisup', default=False, type=bool,
 parser.add_argument('-v', '--version', default='sum_fusion', type=str,
                     help='Adding the fusion method')
 # uncomment for segmentation run
-# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
-#                     nargs="?", type=str, help="Configuration file to use")
+parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
+                    nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for depth run
 # parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_depth',
 #                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for both tasks
-parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
-                    nargs="?", type=str, help="Configuration file to use")
+# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
+#                     nargs="?", type=str, help="Configuration file to use")
 
 args = parser.parse_args()
 with open(args.config) as fp:
@@ -212,8 +213,13 @@ else:
     mulit_task_ = False
 
 # initialise multi (or single) - task model
-model = TemporalModel(cfg, TASK, CLASS_TASKS, drop_out,
-                      window_size, k, semisup_loss, unsup_loss, version=version, mulit_task=mulit_task_).to(device)
+# model = TemporalModel(cfg, TASK, CLASS_TASKS, drop_out,
+#                       window_size, k, semisup_loss, unsup_loss, version=version, mulit_task=mulit_task_).to(device)
+
+model = TemporalModel2(cfg, TASK, CLASS_TASKS, drop_out,
+                       window_size, k, semisup_loss, unsup_loss,
+                       version=version, mulit_task=mulit_task_, causual_first_layer=False).to(device)
+
 # model = model.to(device)
 # Push model to GPU
 if torch.cuda.is_available():
@@ -496,7 +502,7 @@ with mlflow.start_run():
             metrics['train_rel_error'].append(train_rel_err)
             metrics['train_acc'].append(train_acc)
             metrics['train_miou'].append(train_miou)
-            print('Epoch {} train loss: {:.4f}, abs error: {:.4f}, '
+            print('Train: epoch {} loss: {:.4f}, abs error: {:.4f}, '
                   'rel error: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch,
                                                                         train_loss,
                                                                         train_abs_err,
@@ -563,7 +569,7 @@ with mlflow.start_run():
     # Since the model was logged as an artifact, it can be loaded to make predictions
     print("\nLoading model to make predictions on test set")
     if os.path.exists(os.path.join(MODEL_SAVE_PATH, 'best_checkpoint.pth.tar')):
-        loaded_model = torch.load()
+        loaded_model = torch.load(os.path.join(MODEL_SAVE_PATH, 'best_checkpoint.pth.tar'))
     else:
         loaded_model = torch.load(os.path.join(MODEL_SAVE_PATH, 'latest_val_checkpoint.pth.tar'))
     # loaded_model = mlflow.pytorch.load_model(mlflow.get_artifact_uri("pytorch-" + TASK + "-best"))
@@ -581,7 +587,7 @@ with mlflow.start_run():
         metrics_test['test_acc'].append(test_acc)
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_miou'].append(test_miou)
-        print('Epoch {} test loss: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch, test_loss, test_acc, test_miou))
+        print('Test: epoch {}, loss: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch, test_loss, test_acc, test_miou))
 
     elif TASK == 'depth':
         metrics_test = {'test_loss': [],
@@ -594,7 +600,7 @@ with mlflow.start_run():
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_rel_error'].append(test_rel_error)
 
-        print('Epoch {} Test loss: {:.4f}, test abs error: {:.4f}, test rel error: {:.4f}'.format(epoch,
+        print('Test: epoch {}, loss: {:.4f}, test abs error: {:.4f}, test rel error: {:.4f}'.format(epoch,
                                                                                                   test_loss,
                                                                                                   test_abs_error,
                                                                                                   test_rel_error))
@@ -612,7 +618,7 @@ with mlflow.start_run():
         metrics_test['test_acc'].append(test_acc)
         metrics_test['test_miou'].append(test_miou)
 
-        print('Epoch {} Test loss: {:.4f}, abs error: {:.4f}, '
+        print('Test: epoch {}, loss: {:.4f}, abs error: {:.4f}, '
               'rel error: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch,
                                                                     test_loss,
                                                                     test_abs_error,
