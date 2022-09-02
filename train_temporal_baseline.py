@@ -25,9 +25,9 @@ from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback, Sy
 from utils.metrics import plot_learning_curves
 from loss.loss import InverseDepthL1Loss, L1LossIgnoredRegion, consistency_weight,  \
     softmax_mse_loss, softmax_kl_loss, softmax_js_loss
-from scheduler import get_scheduler
+# from scheduler import get_scheduler
 # from deeplabv3plus import Deeplab_v3plus
-import deeplab
+# import deeplab
 from utils.metrics_seg import StreamSegMetrics
 from utils import ext_transforms as et
 
@@ -54,16 +54,16 @@ parser.add_argument('-semisup', '--semisup', default=False, type=bool,
 parser.add_argument('-v', '--version', default='sum_fusion', type=str,
                     help='Adding the fusion method')
 # uncomment for segmentation run
-parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
-                    nargs="?", type=str, help="Configuration file to use")
+# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
+#                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for depth run
 # parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_depth',
 #                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for both tasks
-# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
-#                     nargs="?", type=str, help="Configuration file to use")
+parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
+                    nargs="?", type=str, help="Configuration file to use")
 
 args = parser.parse_args()
 with open(args.config) as fp:
@@ -178,7 +178,7 @@ deeplabv3_backbone_fast = cfg["model"]["backbone"]["encoder"]["resnet_fast"]
 
 # initialise decoders (one for each task)
 drop_out = cfg["model"]["dropout"]
-version = 'sum_fusion'
+# version = 'sum_fusion'
 # version = 'convnet_fusion'
 # version = 'global_atten_fusion'
 # version = 'conv3d_fusion'
@@ -220,10 +220,10 @@ if torch.cuda.is_available():
     model = torch.nn.DataParallel(model).to(device)
     print('Model pushed to {} GPU(s), type {}.'.format(torch.cuda.device_count(), torch.cuda.get_device_name(0)))
 
-model_opt = optim.Adam(model.parameters(), lr=0.0001)
+model_opt = optim.Adam(model.parameters(), lr=0.01)
 # model_opt = optim.Adam(model.parameters(), lr=cfg["training"]["optimizer"]["lr0"])
 scheduler = optim.lr_scheduler.StepLR(model_opt,
-                                      step_size=100,
+                                      step_size=1000,
                                       gamma=0.5)
 
 # directory name to save the models
@@ -399,14 +399,14 @@ with mlflow.start_run():
                 metrics['val_loss'].append(val_loss)
                 metrics['val_miou'].append(val_miou)
 
-                print('Epoch {} val loss: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch, val_loss, val_acc, val_miou))
+                print('Validation: epoch {} val loss: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch, val_loss, val_acc, val_miou))
                 # Save latest validation checkpoint
                 path_save_model = os.path.join(MODEL_SAVE_PATH, 'latest_val_checkpoint.pth.tar')
                 save_ckpt(path_save_model, model, model_opt, scheduler, metrics, val_miou, epoch)
                 # # Since the model was logged as an artifact, it can be loaded to make predictions
-                mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-trained", pickle_module=pickle)
-                print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
-                                                                     "pytorch-" + TASK + "-trained"))
+                # mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-trained", pickle_module=pickle)
+                # print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
+                #                                                      "pytorch-" + TASK + "-trained"))
 
                 with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
                     epoch_log.write('Validation: {}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, val_loss,
@@ -419,13 +419,12 @@ with mlflow.start_run():
                     save_ckpt(path_save_model, model, model_opt, scheduler, metrics, best_miou, epoch)
                     mlflow.log_metric('best_miou', best_miou)
                     # print("\nLogging the trained model as a run artifact...")
-                    mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-best", pickle_module=pickle)
+                    # mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-best", pickle_module=pickle)
 
             # Write segmentation logs epoch, train loss, val loss, train acc, val acc, miou
 
             with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
-                epoch_log.write('Train: {}, {:.5f}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, train_loss, val_loss,
-                                                                                     train_acc, train_miou))
+                epoch_log.write('Train: {}, {:.5f}, {:.5f}, {:.5f}\n'.format(epoch, train_loss, train_acc, train_miou))
             mlflow.log_artifact(os.path.join(LOG_FILE, 'log_results.txt'))
 
 
@@ -453,15 +452,15 @@ with mlflow.start_run():
                 metrics['val_loss'].append(val_loss)
                 metrics['val_rel_error'].append(val_rel_error)
 
-                print('Epoch {} val loss: {:.4f}, val abs error: {:.4f}, val rel error: {:.4f}'.format(epoch,
-                                                                                                       val_loss,
-                                                                                                       val_abs_error,
-                                                                                                       val_rel_error))
+                print('Validation: epoch {} val loss: {:.4f}, val abs error: {:.4f}, val rel error: {:.4f}'.format(epoch,
+                                                                                                                   val_loss,
+                                                                                                                   val_abs_error,
+                                                                                                                   val_rel_error))
                 # Save latest validation checkpoint
                 path_save_model = os.path.join(MODEL_SAVE_PATH, 'latest_val_checkpoint.pth.tar')
                 save_ckpt(path_save_model, model, model_opt, scheduler, metrics, val_abs_error, epoch)
-                print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
-                                                                     "pytorch-" + TASK + "-trained"))
+                # print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
+                #                                                      "pytorch-" + TASK + "-trained"))
 
                 with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
                     epoch_log.write('Validation: {}, {:.5f}, {:.5f} \n'.format(epoch, val_loss, val_abs_error))
@@ -473,9 +472,9 @@ with mlflow.start_run():
                     path_save_model = os.path.join(MODEL_SAVE_PATH, 'best_checkpoint.pth.tar')
                     save_ckpt(path_save_model, model, model_opt, scheduler, metrics, lowest_depth_error, epoch)
                     mlflow.log_metric('best_abs_error', lowest_depth_error)
-                    mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-best", pickle_module=pickle)
-                    print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
-                                                                         "pytorch-" + TASK + "-best"))
+                    # mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-best", pickle_module=pickle)
+                    # print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
+                    #                                                      "pytorch-" + TASK + "-best"))
 
             # Write Depth logs
             with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
@@ -516,7 +515,7 @@ with mlflow.start_run():
                 metrics['val_rel_error'].append(val_rel_err)
                 metrics['val_acc'].append(val_acc)
                 metrics['val_miou'].append(val_miou)
-                print('Epoch {} val loss: {:.4f}, abs error: {:.4f}, '
+                print('Validation: epoch {} val loss: {:.4f}, abs error: {:.4f}, '
                       'rel error: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch,
                                                                             val_loss,
                                                                             val_abs_err,
@@ -526,11 +525,11 @@ with mlflow.start_run():
                 # Save latest validation checkpoint
                 path_save_model = os.path.join(MODEL_SAVE_PATH, 'latest_val_checkpoint.pth.tar')
                 save_ckpt(path_save_model, model, model_opt, scheduler, metrics, val_miou, epoch)
-                print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
-                                                                     "pytorch-" + TASK + "-trained"))
+                # print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
+                #                                                      "pytorch-" + TASK + "-trained"))
 
                 with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
-                    epoch_log.write('Train: {}, {:.5f}, {:.5f}, {:.5f}, {:.5f} \n'.format(epoch, train_loss,
+                    epoch_log.write('Train: {}, {:.5f}, {:.5f}, {:.5f}, {:.5f} \n'.format(epoch, val_loss,
                                                                                           val_abs_err,
                                                                                           val_acc, val_miou))
                 # Save best model to file
@@ -538,17 +537,18 @@ with mlflow.start_run():
                     print('Val error improved from {:.4f} to {:.4f}.'.format(lowest_depth_error, val_abs_err))
                     lowest_depth_error = val_abs_err
                     best_miou = val_miou
+                    path_save_model = os.path.join(MODEL_SAVE_PATH, 'best_checkpoint.pth.tar')
                     save_ckpt(path_save_model, model, model_opt, scheduler, metrics, val_miou, epoch)
                     mlflow.log_metric('best_abs_error', lowest_depth_error)
                     mlflow.log_metric('best_miou', val_miou)
-                    mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-best", pickle_module=pickle)
-                    print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
-                                                                         "pytorch-" + TASK + "-best"))
+                    # mlflow.pytorch.log_model(model, artifact_path="pytorch-" + TASK + "-best", pickle_module=pickle)
+                    # print("\nThe model is logged at:\n%s" % os.path.join(mlflow.get_artifact_uri(),
+                    #                                                      "pytorch-" + TASK + "-best"))
             # Write segmentation logs
             with open(os.path.join(LOG_FILE, 'log_results.txt'), 'a') as epoch_log:
                 epoch_log.write('Train: {}, {:.5f}, {:.5f}, {:.5f}, {:.5f} \n'.format(epoch, train_loss, train_abs_err,
                                                                                       train_acc, train_miou))
-            mlflow.log_artifact(os.path.join(LOG_FILE, 'log_results.txt'))
+            # mlflow.log_artifact(os.path.join(LOG_FILE, 'log_results.txt'))
 
         # Track the metrics in mlflow
         for key, value in metrics.items():
@@ -562,7 +562,11 @@ with mlflow.start_run():
 
     # Since the model was logged as an artifact, it can be loaded to make predictions
     print("\nLoading model to make predictions on test set")
-    loaded_model = mlflow.pytorch.load_model(mlflow.get_artifact_uri("pytorch-" + TASK + "-best"))
+    if os.path.exists(os.path.join(MODEL_SAVE_PATH, 'best_checkpoint.pth.tar')):
+        loaded_model = torch.load()
+    else:
+        loaded_model = torch.load(os.path.join(MODEL_SAVE_PATH, 'latest_val_checkpoint.pth.tar'))
+    # loaded_model = mlflow.pytorch.load_model(mlflow.get_artifact_uri("pytorch-" + TASK + "-best"))
 
     # run on test set
     print('--- Testing ---')
@@ -573,7 +577,7 @@ with mlflow.start_run():
         # test set
         test_acc, test_loss, test_miou = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
                                                                  val_dataloader, model, TASK, SAMPLES_PATH,
-                                                                 cfg, save_val_imgs=True)
+                                                                 cfg, save_val_imgs=False)
         metrics_test['test_acc'].append(test_acc)
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_miou'].append(test_miou)
@@ -585,7 +589,7 @@ with mlflow.start_run():
                         'test_rel_error': []}
         test_rel_error, test_abs_error, test_loss = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
                                                                             val_dataloader, model, TASK, SAMPLES_PATH,
-                                                                            cfg, save_val_imgs=True)
+                                                                            cfg, save_val_imgs=False)
         metrics_test['test_abs_error'].append(test_abs_error)
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_rel_error'].append(test_rel_error)
@@ -602,7 +606,7 @@ with mlflow.start_run():
                         'test_miou': []}
         test_loss, test_abs_error, test_rel_error, test_acc, test_miou = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
                                                                                                  val_dataloader, model, TASK, SAMPLES_PATH,
-                                                                                                 cfg, save_val_imgs=True)
+                                                                                                 cfg, save_val_imgs=False)
         metrics_test['test_abs_error'].append(test_abs_error)
         metrics_test['test_loss'].append(test_loss)
         metrics_test['test_acc'].append(test_acc)
@@ -616,8 +620,8 @@ with mlflow.start_run():
                                                                     test_acc,
                                                                     test_miou))
     # Track the metrics in mlflow
-    for key, value in metrics_test.items():
-        mlflow.log_metric(key, value[-1])
+    # for key, value in metrics_test.items():
+    #     mlflow.log_metric(key, value[-1])
     # # Extract a few examples from the test dataset to evaluate on
     # eval_data, eval_labels, eval_depth = next(iter(test_dataloader))
     # # Make a few predictions

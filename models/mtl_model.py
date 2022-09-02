@@ -129,7 +129,7 @@ class TemporalModel(nn.Module):
             self.se_layer_depth = SE_Layer(input_dim_decoder, 2)
             self.se_layer_seg = SE_Layer(input_dim_decoder, 2)
 
-            if version == 'causal_fusion':
+            if version == 'causal_fusion' or version == 'conv3d_fusion':
                 self.casual_pass_depth = nn.Sequential(CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3),),
                                                        CausalConv3d(in_channels=256 ,out_channels=256,kernel_size=(3, 3, 3), ), )
                 self.casual_pass_seg = nn.Sequential(CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ),
@@ -256,12 +256,18 @@ class TemporalModel(nn.Module):
             task_predictions = task_predictions.squeeze(1)
         else:
             # pass the average fusion to segmentation but not depth
-            x_fusion_sum = torch.sum(x_fusion_input, dim=1)
-            x_fusion_sum_se = self.se_layer_depth(x_fusion_sum)
-            depth_pred = self.list_decoders[0](x_fusion_sum_se)
+            x_fusion_input_seg = torch.stack([self.se_layer_seg(x_fusion_input[:, 0]),
+                                              self.se_layer_seg(x_fusion_input[:, 1]),
+                                              self.se_layer_seg(x_fusion_input[:, 2])], dim=1)
+
+            x_fusion_input_depth = torch.stack([self.se_layer_depth(x_fusion_input[:, 0]),
+                                                self.se_layer_depth(x_fusion_input[:, 1]),
+                                                self.se_layer_depth(x_fusion_input[:, 2])], dim=1)
+            x_fusion_sum_seg = torch.sum(x_fusion_input_seg, dim=1)
+            x_fusion_sum_depth = torch.sum(x_fusion_input_depth, dim=1)
+            depth_pred = self.list_decoders[0](x_fusion_sum_depth)
             depth_pred = depth_pred.squeeze(1)
-            x_fusion_sum_se = self.se_layer_seg(x_fusion_sum)
-            seg_pred = self.list_decoders[1](x_fusion_sum_se)
+            seg_pred = self.list_decoders[1](x_fusion_sum_seg)
             seg_pred = seg_pred.squeeze(1)
             task_predictions = [depth_pred, seg_pred]
         return task_predictions
@@ -287,8 +293,6 @@ class TemporalModel(nn.Module):
             depth_pred = depth_pred.squeeze(1)
             seg_pred = self.list_decoders[1](x_fusion_input_seg)
             seg_pred = seg_pred.squeeze(1)
-            print(depth_pred.shape)
-            print(seg_pred.shape)
             task_predictions = [depth_pred, seg_pred]
         return task_predictions
 
@@ -525,12 +529,9 @@ class SE_Layer(nn.Module):
         )
 
     def forward(self, x):
-        print(x.shape)
         b, c, _, _ = x.size()
         y = self.avg_pool(x).view(b, c)
-        print(y.shape)
         y = self.fc(y).view(b, c, 1, 1)
-        print(y.shape)
         return x * y.expand_as(x)
 
 class ChannelSELayer3D(nn.Module):
