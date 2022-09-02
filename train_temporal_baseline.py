@@ -54,6 +54,8 @@ parser.add_argument('-semisup', '--semisup', default=False, type=bool,
                     help='Bool declaring add semi supervision pathway to network')
 parser.add_argument('-v', '--version', default='sum_fusion', type=str,
                     help='Adding the fusion method')
+parser.add_argument('-c', '--causal', default=False, type=bool,
+                    help='Checking the causal pathway')
 # uncomment for segmentation run
 parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
                     nargs="?", type=str, help="Configuration file to use")
@@ -93,7 +95,7 @@ TASK = cfg["model"]["tasks"]
 version = args.version
 unsup_ = args.unsup
 semi_sup_ = args.semisup
-
+causal = args.causal
 print('Running experiment on Task: ' + TASK)
 print('Temporal version: ' + version)
 print('Adding unsupervised learning to encoders: ' + str(unsup_))
@@ -218,7 +220,7 @@ else:
 
 model = TemporalModel2(cfg, TASK, CLASS_TASKS, drop_out,
                        window_size, k, semisup_loss, unsup_loss,
-                       version=version, mulit_task=mulit_task_, causual_first_layer=False).to(device)
+                       version=version, mulit_task=mulit_task_, causual_first_layer=causal).to(device)
 
 # model = model.to(device)
 # Push model to GPU

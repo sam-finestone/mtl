@@ -57,7 +57,7 @@ class TemporalModel2(nn.Module):
 
         if version == 'sum_fusion':
             input_dim_decoder = 256
-        elif version == 'convnet_fusion':
+        if version == 'convnet_fusion':
             # number of keyframes + last_fast + annotated_frame
             if len(list_kf_indicies) > len(list_non_kf_indicies):
                 if len(list_kf_indicies) > 1:
@@ -70,9 +70,12 @@ class TemporalModel2(nn.Module):
                 else:
                     t_dim = 2
             input_dim_decoder = 256
-            self.with_se_block = True
-            self.se_layer = SE_Layer(input_dim_decoder, 2)
-            self.convnet_fusion_layer = nn.Conv3d(input_dim_decoder, 256, kernel_size=(t_dim, 1, 1), stride=1)
+            self.with_se_block = False
+            # self.se_layer = SE_Layer(input_dim_decoder, 2)
+            if self.causal_conv:
+                self.convnet_fusion_layer = nn.Conv3d(input_dim_decoder, 256, kernel_size=(4, 1, 1), stride=1)
+            if not self.causal_conv:
+                self.convnet_fusion_layer = nn.Conv3d(input_dim_decoder, 256, kernel_size=(t_dim, 1, 1), stride=1)
 
         # elif version == 'global_atten_fusion':
         #     input_dim_t = 256
@@ -107,18 +110,18 @@ class TemporalModel2(nn.Module):
                 self.task_decoder = DepthDecoder(512, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
 
         # Set up the appropriate multi-task decoder for multi-task
-        elif task == 'depth_segmentation':
+        if task == 'depth_segmentation':
             depth_class = class_tasks[0]
             seg_class = class_tasks[1]
             input_dim_decoder = 256
             self.se_layer_depth = SE_Layer(input_dim_decoder, 2)
             self.se_layer_seg = SE_Layer(input_dim_decoder, 2)
-
-            if version == 'causal_fusion' or version == 'conv3d_fusion':
-                self.casual_pass_depth = nn.Sequential(CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3),),
-                                                       CausalConv3d(in_channels=256 ,out_channels=256,kernel_size=(3, 3, 3), ), )
-                self.casual_pass_seg = nn.Sequential(CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ),
-                                                     CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ), )
+            self.casual_pass_depth = nn.Sequential(
+                CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ),
+                CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ), )
+            self.casual_pass_seg = nn.Sequential(
+                CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ),
+                CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ), )
             # self.task_decoder = MultiDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
             depth_dec = [DepthDecoder(input_dim_decoder, depth_class, seg_drop_out, SynchronizedBatchNorm1d)]
             seg_dec = [SegDecoder(input_dim_decoder, seg_class, seg_drop_out, SynchronizedBatchNorm1d)]
@@ -140,32 +143,6 @@ class TemporalModel2(nn.Module):
         # check if we are to using regularise the encoders then need the output of all frames in encoder
         enc_ftrs, batch_size, t_dim = self.run_encoder(input, self.shared_encoder)
         output_ftrs = self.reshape_output(enc_ftrs, batch_size, t_dim)
-
-        if self.causal_conv:
-            # slow_output = torch.stack([self.se_layer_single(output_ftrs[:, 0]),
-            #                            self.se_layer_single(output_ftrs[:, 1]),
-            #                            self.se_layer_single(output_ftrs[:, 2])], dim=1)
-            # Through the casual module
-            slow_output = torch.stack([self.se_layer_slow(output_ftrs[:, 0]),
-                                       self.se_layer_slow(output_ftrs[:, 2])], dim=1)
-            fast_output = torch.stack([self.se_layer_fast(output_ftrs[:, 1]),
-                                       self.se_layer_fast(output_ftrs[:, 2])], dim=1)
-            x_fusion_input_slow = slow_output.permute(0, 2, 1, 3, 4)
-            x_fusion_input_fast = fast_output.permute(0, 2, 1, 3, 4)
-            x_fusion_causal_slow = self.casual_conv_slow(x_fusion_input_slow)
-            x_fusion_causal_fast = self.casual_conv_fast(x_fusion_input_fast)
-            # else:
-            #     x_fusion_input_seg = torch.stack([self.se_layer_seg(output_ftrs[:, 0]),
-            #                                       self.se_layer_seg(output_ftrs[:, 1]),
-            #                                       self.se_layer_seg(output_ftrs[:, 2])], dim=1)
-            #
-            #     x_fusion_input_depth = torch.stack([self.se_layer_depth(output_ftrs[:, 0]),
-            #                                         self.se_layer_depth(output_ftrs[:, 1]),
-            #                                         self.se_layer_depth(output_ftrs[:, 2])], dim=1)
-            #     x_fusion_input_depth = x_fusion_input_depth.permute(0, 2, 1, 3, 4)
-            #     x_fusion_causal_depth = self.casual_pass_depth(x_fusion_input_depth)
-            #     x_fusion_input_seg = x_fusion_input_seg.permute(0, 2, 1, 3, 4)
-            #     x_fusion_causal_seg = self.casual_pass_seg(x_fusion_input_seg)
 
         # if self.version == 'global_atten_fusion':
         #     task_predictions = self.global_attention_fusion(output_slow, output_fast, list_kf_indicies,
@@ -225,10 +202,26 @@ class TemporalModel2(nn.Module):
         # Output based on model choice
         return {'supervised': task_predictions}
 
+    def add_casaul_module(self, output_ftrs):
+        slow_output = torch.stack([self.se_layer_slow(output_ftrs[:, 0]),
+                                   self.se_layer_slow(output_ftrs[:, 2])], dim=1)
+        fast_output = torch.stack([self.se_layer_fast(output_ftrs[:, 1]),
+                                   self.se_layer_fast(output_ftrs[:, 2])], dim=1)
+        x_fusion_input_slow = slow_output.permute(0, 2, 1, 3, 4)
+        x_fusion_input_fast = fast_output.permute(0, 2, 1, 3, 4)
+        x_fusion_causal_slow = self.casual_conv_slow(x_fusion_input_slow)
+        x_fusion_causal_fast = self.casual_conv_fast(x_fusion_input_fast)
+        x_fusion_causal_slow = x_fusion_causal_slow.permute(0, 2, 1, 3, 4)
+        x_fusion_causal_fast = x_fusion_causal_fast.permute(0, 2, 1, 3, 4)
+        x_fusion_input = torch.cat([x_fusion_causal_slow, x_fusion_causal_fast], dim=1)
+        return x_fusion_input
+
     def sum_fusion(self, enc_ftrs, mulit_task=False, causal=False):
         # x_fusion_input = self.compose_fusion_tensor(annotated_frame, output_slow, output_fast)
         if not mulit_task:
-            #  depth decoder or segmentation decoder
+            if causal:
+                enc_ftrs = self.add_casaul_module(enc_ftrs)
+
             x_fusion = torch.sum(enc_ftrs, dim=1).squeeze(1)
             # print(x_fusion.shape)
             task_predictions = self.task_decoder(x_fusion)
@@ -255,9 +248,12 @@ class TemporalModel2(nn.Module):
         # x_fusion_input = self.compose_fusion_tensor(annotated_frame, output_slow, output_fast)
         # x_fusion = torch.cat([output_slow, fast_frame], dim=1)
         if not mulit_task:
-            if not causal:
-                task_predictions = self.task_decoder(enc_ftrs)
-                task_predictions = task_predictions.squeeze(1)
+            if causal:
+                enc_ftrs = self.add_casaul_module(enc_ftrs)
+                # task_predictions = self.task_decoder(enc_ftrs)
+                # task_predictions = task_predictions.squeeze(1)
+            task_predictions = self.task_decoder(enc_ftrs)
+            task_predictions = task_predictions.squeeze(1)
         else:
             # pass through SE layer
             x_fusion_input_seg = torch.stack([self.se_layer_seg(enc_ftrs[:, 0]),
@@ -303,9 +299,13 @@ class TemporalModel2(nn.Module):
     def convnet_fusion(self, enc_ftrs, with_se_block=False, causal=False):
         # take the slow output of the keyframes and the last frame of the fast
         # x_fusion_input = self.compose_fusion_tensor(annotated_frame, output_slow, output_fast)
+        if causal:
+            enc_ftrs = self.add_casaul_module(enc_ftrs)
+
         x_fusion = enc_ftrs.permute(0, 2, 1, 3, 4)
         x_fusion = self.convnet_fusion_layer(x_fusion)
         x_fusion = x_fusion.permute(0, 1, 2, 3, 4).squeeze()
+
         if with_se_block:
             x_fusion = x_fusion.unsqueeze(1)
             x_fusion = self.se_layer(x_fusion)

@@ -289,6 +289,7 @@ class TemporalModel(nn.Module):
             x_fusion_input_depth = torch.stack([self.se_layer_depth(x_fusion_input[:, 0]),
                                                 self.se_layer_depth(x_fusion_input[:, 1]),
                                                 self.se_layer_depth(x_fusion_input[:, 2])], dim=1)
+
             depth_pred = self.list_decoders[0](x_fusion_input_depth)
             depth_pred = depth_pred.squeeze(1)
             seg_pred = self.list_decoders[1](x_fusion_input_seg)
