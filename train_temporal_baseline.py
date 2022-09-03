@@ -54,19 +54,19 @@ parser.add_argument('-semisup', '--semisup', default=False, type=bool,
                     help='Bool declaring add semi supervision pathway to network')
 parser.add_argument('-v', '--version', default='sum_fusion', type=str,
                     help='Adding the fusion method')
-parser.add_argument('-c', '--causal', default=False, type=bool,
+parser.add_argument('-c', '--causal', default=True, type=bool,
                     help='Checking the causal pathway')
 # uncomment for segmentation run
-parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
-                    nargs="?", type=str, help="Configuration file to use")
+# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
+#                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for depth run
 # parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_depth',
 #                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for both tasks
-# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
-#                     nargs="?", type=str, help="Configuration file to use")
+parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
+                    nargs="?", type=str, help="Configuration file to use")
 
 args = parser.parse_args()
 with open(args.config) as fp:
@@ -96,6 +96,7 @@ version = args.version
 unsup_ = args.unsup
 semi_sup_ = args.semisup
 causal = args.causal
+
 print('Running experiment on Task: ' + TASK)
 print('Temporal version: ' + version)
 print('Adding unsupervised learning to encoders: ' + str(unsup_))
@@ -108,7 +109,7 @@ mlflow.set_experiment(experiment_name=NAME_EXPERIMENT)
 train_transform = et.ExtCompose([
             et.ExtResize((128, 256)),
             # et.ExtRandomCrop(size=(opts.crop_size, opts.crop_size)),
-            et.ExtColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
+            # et.ExtColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
             et.ExtRandomHorizontalFlip(),
             et.ExtToTensor(),
             et.ExtNormalize(mean=[0.485, 0.456, 0.406],
@@ -228,10 +229,10 @@ if torch.cuda.is_available():
     model = torch.nn.DataParallel(model).to(device)
     print('Model pushed to {} GPU(s), type {}.'.format(torch.cuda.device_count(), torch.cuda.get_device_name(0)))
 
-model_opt = optim.Adam(model.parameters(), lr=0.01)
+model_opt = optim.Adam(model.parameters(), lr=0.0001)
 # model_opt = optim.Adam(model.parameters(), lr=cfg["training"]["optimizer"]["lr0"])
 scheduler = optim.lr_scheduler.StepLR(model_opt,
-                                      step_size=1000,
+                                      step_size=100,
                                       gamma=0.5)
 
 # directory name to save the models
@@ -241,6 +242,8 @@ elif semi_sup_ and  not unsup_:
     file = TASK + '_semisup_'
 elif not semi_sup_ and unsup_:
     file = TASK + '_unsup_'
+elif causal:
+    file = TASK + '_causal_slow_fast'
 else:
     file = TASK
 
@@ -316,7 +319,7 @@ if TASK == 'segmentation':
                'val_acc': [],
                'val_loss': [],
                'val_miou': []}
-    criterion = torch.nn.CrossEntropyLoss(ignore_index=255, reduction='mean')
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=train_set.ignore_class, reduction='mean')
     # criterion = utils.FocalLoss(ignore_index=255, size_average=True)
 
 elif TASK == 'depth':
@@ -352,7 +355,7 @@ elif TASK == 'depth_segmentation':
     # criterion = torch.nn.MSELoss()
     # criterion = torch.nn.L1Loss()
     # criterion = [InverseDepthL1Loss(), torch.nn.CrossEntropyLoss(ignore_index=train_set.ignore_index)]
-    criterion = [L1LossIgnoredRegion(), torch.nn.CrossEntropyLoss(ignore_index=255, reduction='mean')]
+    criterion = [L1LossIgnoredRegion(), torch.nn.CrossEntropyLoss(ignore_index=train_set.ignore_class, reduction='mean')]
 
 print('Beginning training...')
 with mlflow.start_run():

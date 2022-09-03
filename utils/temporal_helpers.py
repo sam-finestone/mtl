@@ -213,7 +213,11 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
     miou_running = AverageMeter('Miou', ':.3f')
     metrics = StreamSegMetrics(19)
     if task == 'segmentation':
-        # iou = iouCalc(classLabels, validClasses, voidClass=void)
+        # classLabels = test_loader.dataset.class_names()
+        validClasses = test_loader.dataset.valid_classes
+        classLabels = test_loader.dataset.class_names
+        void = 19
+        iou = iouCalc(classLabels, validClasses, voidClass=void)
         progress = ProgressMeter(
             len(test_loader),
             [batch_time, data_time, loss_running, acc_running, miou_running],
@@ -226,7 +230,10 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
             prefix="Train, epoch: [{}]".format(epoch))
 
     if task == 'depth_segmentation':
-        # iou = iouCalc(classLabels, validClasses, voidClass=void)
+        validClasses = test_loader.dataset.valid_classes
+        classLabels = test_loader.dataset.class_names
+        void = 19
+        iou = iouCalc(classLabels, validClasses, voidClass=void)
         progress = ProgressMeter(
             len(test_loader),
             [batch_time, data_time, loss_running, abs_error_running, rel_error_running, acc_running, miou_running],
@@ -279,6 +286,7 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 total_loss = total_loss.item()
                 loss_running.update(total_loss, bs)
 
+                iou.evaluateBatch(task_pred, gt_semantic_labels)
                 # Save visualizations of first batch
                 if save_val_imgs is not None and batch_idx == 0:
                     # get the images from the T dimension that have predicitons on them so last frame in T
@@ -336,7 +344,7 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 bs = inputs.size(0)  # current batch size
                 loss = total_loss.item()
                 loss_running.update(loss, bs)
-
+                iou.evaluateBatch(seg_pred, gt_semantic_labels)
                 abs_err, rel_err = depth_error2(depth_pred, gt_depth)
                 abs_error_running.update(abs_err)
                 rel_error_running.update(rel_err)
@@ -367,13 +375,14 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
         return rel_error_running.avg, abs_error_running.avg, loss_running.avg
 
     if task == 'segmentation':
-        # miou = iou.outputScores()
+        miou = iou.outputScores(folder)
         result = metrics.get_results()
         print('Accuracy      : {:5.3f}'.format(result['Mean Acc']))
         print('Miou      : {:5.3f}'.format(result['Mean IoU']))
         print('---------------------')
         return result['Mean Acc'], loss_running.avg, result['Mean IoU']
     # output for multi task learning
+    miou = iou.outputScores(folder)
     print('Abs. Error      : {:5.3f}'.format(abs_error_running.avg))
     print('Rel Error      : {:5.3f}'.format(rel_error_running.avg))
     print('Accuracy      : {:5.3f}'.format(acc_running.avg))

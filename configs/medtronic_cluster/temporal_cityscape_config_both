@@ -8,7 +8,7 @@ model:
     dropout: 0.5
     path_num: 2
     window_size: 3
-    version: average_fusion
+    version: sum_fusion
     k: 2
     frames_per_segment: 48
     tasks: depth_segmentation # depth or segmentation
@@ -24,10 +24,10 @@ data:
     path: /mnt/c44578a3-8e98-4fc3-a8b4-72266618fb8a/sam_dataset/data/cityscapes_static
 
 training:
-    n_workers: 4
-    train_iters: 200
+    n_workers: 18
+    train_iters: 1
     batch_size: 8
-    val_interval: 25
+    val_interval: 1
     print_interval: 2
     pretrain: True
     loss:

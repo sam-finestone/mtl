@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/../DeepLab-v3-plus-cityscapes/.idea/DeepLab-v3-plus-cityscapes.iml" filepath="$PROJECT_DIR$/../DeepLab-v3-plus-cityscapes/.idea/DeepLab-v3-plus-cityscapes.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../DeepLabV3Plus-Pytorch/.idea/DeepLabV3Plus-Pytorch.iml" filepath="$PROJECT_DIR$/../DeepLabV3Plus-Pytorch/.idea/DeepLabV3Plus-Pytorch.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../DeepLabv3.pytorch/.idea/DeepLabv3.pytorch.iml" filepath="$PROJECT_DIR$/../DeepLabv3.pytorch/.idea/DeepLabv3.pytorch.iml" />
+      <module fileurl="file://$USER_HOME$/Downloads/SlowFast-master/.idea/SlowFast-master.iml" filepath="$USER_HOME$/Downloads/SlowFast-master/.idea/SlowFast-master.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../TDNet/.idea/TDNet.iml" filepath="$PROJECT_DIR$/../TDNet/.idea/TDNet.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../TMANet/.idea/TMANet.iml" filepath="$PROJECT_DIR$/../TMANet/.idea/TMANet.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/mtl.iml" filepath="$PROJECT_DIR$/.idea/mtl.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../../template/.idea/template.iml" filepath="$PROJECT_DIR$/../../template/.idea/template.iml" />
+      <module fileurl="file://$PROJECT_DIR$/../../template2/.idea/template2.iml" filepath="$PROJECT_DIR$/../../template2/.idea/template2.iml" />
+    </modules>
+  </component>
+</project>

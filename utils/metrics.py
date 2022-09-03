@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import sys
 import matplotlib.pyplot as plt
+import os
 
 # mIoU and Acc. formula: accumulate every pixel and average across all pixels in all images
 class ConfMatrix(object):
@@ -164,52 +165,33 @@ class iouCalc():
 
     def evaluateBatch(self, predictionBatch, groundTruthBatch):
         # Calculate IoU scores for single batch
-        assert predictionBatch.size(0) == groundTruthBatch.size(
-            0), 'Number of predictions and labels in batch disagree.'
+        predictionBatch = torch.from_numpy(predictionBatch)
+        groundTruthBatch = torch.from_numpy(groundTruthBatch)
+        assert predictionBatch.size(0) == groundTruthBatch.size(0), \
+            'Number of predictions and labels in batch disagree.'
 
         # Load batch to CPU and convert to numpy arrays
         predictionBatch = predictionBatch.cpu().numpy()
         groundTruthBatch = groundTruthBatch.cpu().numpy()
-
         for i in range(predictionBatch.shape[0]):
             predictionImg = predictionBatch[i, :, :]
             groundTruthImg = groundTruthBatch[i, :, :]
-            # Convert the ids to valid class ids
-            imgHeight = predictionImg.shape[0]
-            imgWidth = predictionImg.shape[1]
 
-            groundTruthImg = groundTruthImg.flatten()
-            predictionImg = predictionImg.flatten()
-            predictionImg = np.array(list(map(lambda x: self.validClasses[x], predictionImg)))
-            groundTruthImg = np.array(list(map(lambda x: self.validClasses[x], groundTruthImg)))
-
-            # reshape tensor
-            predictionImg = np.reshape(predictionImg, (imgHeight, imgWidth))
-            groundTruthImg = np.reshape(groundTruthImg, (imgHeight, imgWidth))
-
-            print(groundTruthImg)
-            print(predictionImg)
-            print(predictionImg.shape)
-            print(groundTruthImg.shape)
-            # Check for equal image sizes
             assert predictionImg.shape == groundTruthImg.shape, 'Image shapes do not match.'
             assert len(predictionImg.shape) == 2, 'Predicted image has multiple channels.'
 
-            imgHeight = predictionImg.shape[0]
-            imgWidth = predictionImg.shape[1]
+            imgWidth = predictionImg.shape[0]
+            imgHeight = predictionImg.shape[1]
             nbPixels = imgWidth * imgHeight
 
             # Evaluate images
-            encoding_value = max(groundTruthImg.max(), predictionImg.max()).astype(np.int32)+1
+            encoding_value = max(groundTruthImg.max(), predictionImg.max()).astype(np.int32) + 1
             encoded = (groundTruthImg.astype(np.int32) * encoding_value) + predictionImg
 
             values, cnt = np.unique(encoded, return_counts=True)
             for value, c in zip(values, cnt):
                 pred_id = value % encoding_value
                 gt_id = int((value - pred_id) / encoding_value)
-                # pred_id = self.validClasses.index()
-                print(pred_id)
-                print(gt_id)
                 if not gt_id in self.validClasses:
                     printError('Unknown label with id {:}'.format(gt_id))
                 self.confMatrix[gt_id][pred_id] += c
@@ -225,7 +207,7 @@ class iouCalc():
 
         return
 
-    def outputScores(self):
+    def outputScores(self, save_file_path):
         # Output scores over dataset
         assert self.confMatrix.sum() == self.nbPixels, 'Number of analyzed pixels and entries in confusion matrix disagree: confMatrix {}, pixels {}'.format(
             self.confMatrix.sum(), self.nbPixels)
@@ -246,7 +228,8 @@ class iouCalc():
         outStr += '---------------------'
 
         print(outStr)
-
+        with open(os.path.join(save_file_path, 'IoU_scores.txt'), 'a') as iou_epoch:
+            iou_epoch.write(outStr)
         return miou
 
 

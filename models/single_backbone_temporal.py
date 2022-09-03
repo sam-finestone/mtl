@@ -87,10 +87,10 @@ class TemporalModel2(nn.Module):
         if self.causal_conv:
             self.se_layer_slow = SE_Layer(256, 2)
             self.se_layer_fast = SE_Layer(256, 2)
-            self.casual_conv_slow = nn.Sequential(CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3),),
-                                                  CausalConv3d(in_channels=256 ,out_channels=256,kernel_size=(3, 3, 3), ), )
-            self.casual_conv_fast = nn.Sequential(CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ),
-                                                  CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ), )
+            self.casual_conv_slow = nn.Sequential(CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3),),
+                                                  CausalConv3d(in_channels=256 ,out_channels=256,kernel_size=(2, 3, 3), ), )
+            self.casual_conv_fast = nn.Sequential(CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3), ),
+                                                  CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3), ), )
 
         # Allocate the appropriate decoder for single task
         if task == 'segmentation':
@@ -116,12 +116,20 @@ class TemporalModel2(nn.Module):
             input_dim_decoder = 256
             self.se_layer_depth = SE_Layer(input_dim_decoder, 2)
             self.se_layer_seg = SE_Layer(input_dim_decoder, 2)
-            self.casual_pass_depth = nn.Sequential(
-                CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ),
-                CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ), )
-            self.casual_pass_seg = nn.Sequential(
-                CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ),
-                CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ), )
+            if self.causal_conv:
+                self.casual_pass_depth = nn.Sequential(
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3), ),
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3), ), )
+                self.casual_pass_seg = nn.Sequential(
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3), ),
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3), ), )
+            else:
+                self.casual_pass_depth = nn.Sequential(
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ),
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ), )
+                self.casual_pass_seg = nn.Sequential(
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ),
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ), )
             # self.task_decoder = MultiDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
             depth_dec = [DepthDecoder(input_dim_decoder, depth_class, seg_drop_out, SynchronizedBatchNorm1d)]
             seg_dec = [SegDecoder(input_dim_decoder, seg_class, seg_drop_out, SynchronizedBatchNorm1d)]
@@ -137,7 +145,7 @@ class TemporalModel2(nn.Module):
     def forward(self, input):
         # [b, t, c, h, w]
         # Get the keyframes and non-keyframes for slow/fast setting
-        print('input shape: ' + str(input.shape))  # - torch.Size([4, 5, 3, 128, 256])
+        # print('input shape: ' + str(input.shape))  # - torch.Size([4, 5, 3, 128, 256])
         keyframes, non_keyframes, list_kf_indicies, list_non_kf_indicies = self.get_keyframes(input)
 
         # check if we are to using regularise the encoders then need the output of all frames in encoder
@@ -186,11 +194,11 @@ class TemporalModel2(nn.Module):
 
         if self.multi_task:
             if self.version == 'sum_fusion':
-                task_predictions = self.sum_fusion(output_ftrs, mulit_task=self.multi_task)
+                task_predictions = self.sum_fusion(output_ftrs, mulit_task=self.multi_task, causal=self.causal_conv)
             elif self.version == 'conv3d_fusion':
-                task_predictions = self.temporal_net(output_ftrs, mulit_task=self.multi_task)
+                task_predictions = self.temporal_net(output_ftrs, mulit_task=self.multi_task, causal=self.causal_conv)
             elif self.version == 'causal_fusion':
-                task_predictions = self.causal_module(output_ftrs)
+                task_predictions = self.causal_module(output_ftrs, causal=self.causal_conv)
 
         # if self.semi_sup['Mode']:
         #     # take all the frames and run them through the main Seg decoder
@@ -228,13 +236,17 @@ class TemporalModel2(nn.Module):
             task_predictions = task_predictions.squeeze(1)
         else:
             # pass the average fusion to segmentation but not depth
-            x_fusion_input_seg = torch.stack([self.se_layer_seg(enc_ftrs[:, 0]),
-                                              self.se_layer_seg(enc_ftrs[:, 1]),
-                                              self.se_layer_seg(enc_ftrs[:, 2])], dim=1)
-
-            x_fusion_input_depth = torch.stack([self.se_layer_depth(enc_ftrs[:, 0]),
-                                                self.se_layer_depth(enc_ftrs[:, 1]),
-                                                self.se_layer_depth(enc_ftrs[:, 2])], dim=1)
+            if causal:
+                enc_ftrs = self.add_casaul_module(enc_ftrs)
+                x_fusion_input_seg = torch.stack([self.se_layer_seg(enc_ftrs[:, i]) for i in range(enc_ftrs.shape[1])],
+                                                 dim=1)
+                x_fusion_input_depth = torch.stack([self.se_layer_depth(enc_ftrs[:, i]) for i in range(enc_ftrs.shape[1])],
+                                                   dim=1)
+            else:
+                x_fusion_input_seg = torch.stack([self.se_layer_seg(enc_ftrs[:, i]) for i in range(enc_ftrs.shape[1])],
+                                                 dim=1)
+                x_fusion_input_depth = torch.stack([self.se_layer_depth(enc_ftrs[:, i]) for i in range(enc_ftrs.shape[1])],
+                                                   dim=1)
             x_fusion_sum_seg = torch.sum(x_fusion_input_seg, dim=1)
             x_fusion_sum_depth = torch.sum(x_fusion_input_depth, dim=1)
             depth_pred = self.list_decoders[0](x_fusion_sum_depth)
@@ -255,33 +267,38 @@ class TemporalModel2(nn.Module):
             task_predictions = self.task_decoder(enc_ftrs)
             task_predictions = task_predictions.squeeze(1)
         else:
-            # pass through SE layer
-            x_fusion_input_seg = torch.stack([self.se_layer_seg(enc_ftrs[:, 0]),
-                                              self.se_layer_seg(enc_ftrs[:, 1]),
-                                              self.se_layer_seg(enc_ftrs[:, 2])], dim=1)
+            if causal:
+                enc_ftrs = self.add_casaul_module(enc_ftrs)
 
-            x_fusion_input_depth = torch.stack([self.se_layer_depth(enc_ftrs[:, 0]),
-                                                self.se_layer_depth(enc_ftrs[:, 1]),
-                                                self.se_layer_depth(enc_ftrs[:, 2])], dim=1)
+            x_fusion_input_seg = torch.stack([self.se_layer_seg(enc_ftrs[:, i]) for i in range(enc_ftrs.shape[1])],
+                                             dim=1)
+            x_fusion_input_depth = torch.stack([self.se_layer_depth(enc_ftrs[:, i]) for i in range(enc_ftrs.shape[1])],
+                                               dim=1)
+            x_fusion_input_depth = x_fusion_input_depth.permute(0, 2, 1, 3, 4)
+            causal_depth = self.casual_pass_depth(x_fusion_input_depth)
+            causal_depth = causal_depth.permute(0, 2, 1, 3, 4)
 
-            depth_pred = self.list_decoders[0](x_fusion_input_depth)
+            x_fusion_input_seg = x_fusion_input_seg.permute(0, 2, 1, 3, 4)
+            causal_seg = self.casual_pass_depth(x_fusion_input_seg)
+            causal_seg = causal_seg.permute(0, 2, 1, 3, 4)
+
+            depth_pred = self.list_decoders[0](causal_depth)
             depth_pred = depth_pred.squeeze(1)
-            seg_pred = self.list_decoders[1](x_fusion_input_seg)
+            seg_pred = self.list_decoders[1](causal_seg)
             seg_pred = seg_pred.squeeze(1)
             task_predictions = [depth_pred, seg_pred]
         return task_predictions
 
-    def causal_module(self, enc_ftrs):
+    def causal_module(self, enc_ftrs, causal=False):
         # x_fusion_input = self.compose_fusion_tensor(annotated_frame, output_slow, output_fast)
         # pass through SE layer
-        x_fusion_input_seg = torch.stack([self.se_layer_seg(enc_ftrs[:, 0]),
-                                          self.se_layer_seg(enc_ftrs[:, 1]),
-                                          self.se_layer_seg(enc_ftrs[:, 2])], dim=1)
+        if causal:
+            enc_ftrs = self.add_casaul_module(enc_ftrs)
 
-        x_fusion_input_depth = torch.stack([self.se_layer_depth(enc_ftrs[:, 0]),
-                                            self.se_layer_depth(enc_ftrs[:, 1]),
-                                            self.se_layer_depth(enc_ftrs[:, 2])], dim=1)
-
+        x_fusion_input_seg = torch.stack([self.se_layer_seg(enc_ftrs[:, i]) for i in range(enc_ftrs.shape[1])],
+                                         dim=1)
+        x_fusion_input_depth = torch.stack([self.se_layer_depth(enc_ftrs[:, i]) for i in range(enc_ftrs.shape[1])],
+                                           dim=1)
         # Through the casual module
         x_fusion_input_depth = x_fusion_input_depth.permute(0, 2, 1, 3, 4)
         x_fusion_causal_depth = self.casual_pass_depth(x_fusion_input_depth)[:, :, -1, ]
