@@ -353,8 +353,8 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 if batch_idx == 0 and save_val_imgs is not None:
                     inputs = inputs[:, -1]
                     filepath = filepath[-1]  # this gets the batch of labelled images with annotations
-                    save_val_results_seg(inputs, gt_semantic_labels, task_pred, test_loader, folder, filepath, epoch)
-                    save_visualization_depth(inputs_annotated, task_pred, gt_depth, filepath, folder, epoch)
+                    save_val_results_seg(inputs, gt_semantic_labels, seg_pred, test_loader, folder, filepath, epoch)
+                    save_visualization_depth(inputs, task_pred, depth_pred, filepath, folder, epoch)
                     # imgs = inputs.data.cpu().numpy()
                     # gt_depth_ = gt_depth.data.cpu().numpy()
                     # pred_depth_ = depth_pred.data.cpu().numpy()
