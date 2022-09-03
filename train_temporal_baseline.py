@@ -54,7 +54,7 @@ parser.add_argument('-semisup', '--semisup', default=False, type=bool,
                     help='Bool declaring add semi supervision pathway to network')
 parser.add_argument('-v', '--version', default='sum_fusion', type=str,
                     help='Adding the fusion method')
-parser.add_argument('-c', '--causal', default=True, type=bool,
+parser.add_argument('-c', '--causal', default=False, type=bool,
                     help='Checking the causal pathway')
 # uncomment for segmentation run
 # parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
