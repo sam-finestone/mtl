@@ -572,64 +572,64 @@ with mlflow.start_run():
     time_elapsed = time.time() - since
 
     # Since the model was logged as an artifact, it can be loaded to make predictions
-    print("\nLoading model to make predictions on test set")
-    if os.path.exists(os.path.join(MODEL_SAVE_PATH, 'best_checkpoint.pth.tar')):
-        loaded_model = torch.load(os.path.join(MODEL_SAVE_PATH, 'best_checkpoint.pth.tar'))
-    else:
-        loaded_model = torch.load(os.path.join(MODEL_SAVE_PATH, 'latest_val_checkpoint.pth.tar'))
+    # print("\nLoading model to make predictions on test set")
+    # if os.path.exists(os.path.join(MODEL_SAVE_PATH, 'best_checkpoint.pth.tar')):
+    #     loaded_model = torch.load(os.path.join(MODEL_SAVE_PATH, 'best_checkpoint.pth.tar'))
+    # else:
+    #     loaded_model = torch.load(os.path.join(MODEL_SAVE_PATH, 'latest_val_checkpoint.pth.tar'))
     # loaded_model = mlflow.pytorch.load_model(mlflow.get_artifact_uri("pytorch-" + TASK + "-best"))
 
     # run on test set
-    print('--- Testing ---')
-    if TASK == 'segmentation':
-        metrics_test = {'test_loss': [],
-                        'test_acc': [],
-                        'test_miou': []}
-        # test set
-        test_acc, test_loss, test_miou = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
-                                                                 val_dataloader, model, TASK, SAMPLES_PATH,
-                                                                 cfg, save_val_imgs=False)
-        metrics_test['test_acc'].append(test_acc)
-        metrics_test['test_loss'].append(test_loss)
-        metrics_test['test_miou'].append(test_miou)
-        print('Test: epoch {}, loss: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch, test_loss, test_acc, test_miou))
-
-    elif TASK == 'depth':
-        metrics_test = {'test_loss': [],
-                        'test_abs_error': [],
-                        'test_rel_error': []}
-        test_rel_error, test_abs_error, test_loss = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
-                                                                            val_dataloader, model, TASK, SAMPLES_PATH,
-                                                                            cfg, save_val_imgs=False)
-        metrics_test['test_abs_error'].append(test_abs_error)
-        metrics_test['test_loss'].append(test_loss)
-        metrics_test['test_rel_error'].append(test_rel_error)
-
-        print('Test: epoch {}, loss: {:.4f}, test abs error: {:.4f}, test rel error: {:.4f}'.format(epoch,
-                                                                                                  test_loss,
-                                                                                                  test_abs_error,
-                                                                                                  test_rel_error))
-    elif TASK == 'depth_segmentation':
-        metrics_test = {'test_loss': [],
-                        'test_abs_error': [],
-                        'test_rel_error': [],
-                        'test_acc': [],
-                        'test_miou': []}
-        test_loss, test_abs_error, test_rel_error, test_acc, test_miou = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
-                                                                                                 val_dataloader, model, TASK, SAMPLES_PATH,
-                                                                                                 cfg, save_val_imgs=False)
-        metrics_test['test_abs_error'].append(test_abs_error)
-        metrics_test['test_loss'].append(test_loss)
-        metrics_test['test_acc'].append(test_acc)
-        metrics_test['test_miou'].append(test_miou)
-
-        print('Test: epoch {}, loss: {:.4f}, abs error: {:.4f}, '
-              'rel error: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch,
-                                                                    test_loss,
-                                                                    test_abs_error,
-                                                                    test_rel_error,
-                                                                    test_acc,
-                                                                    test_miou))
+    # print('--- Testing ---')
+    # if TASK == 'segmentation':
+    #     metrics_test = {'test_loss': [],
+    #                     'test_acc': [],
+    #                     'test_miou': []}
+    #     # test set
+    #     test_acc, test_loss, test_miou = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
+    #                                                              val_dataloader, model, TASK, SAMPLES_PATH,
+    #                                                              cfg, save_val_imgs=False)
+    #     metrics_test['test_acc'].append(test_acc)
+    #     metrics_test['test_loss'].append(test_loss)
+    #     metrics_test['test_miou'].append(test_miou)
+    #     print('Test: epoch {}, loss: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch, test_loss, test_acc, test_miou))
+    #
+    # elif TASK == 'depth':
+    #     metrics_test = {'test_loss': [],
+    #                     'test_abs_error': [],
+    #                     'test_rel_error': []}
+    #     test_rel_error, test_abs_error, test_loss = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
+    #                                                                         val_dataloader, model, TASK, SAMPLES_PATH,
+    #                                                                         cfg, save_val_imgs=False)
+    #     metrics_test['test_abs_error'].append(test_abs_error)
+    #     metrics_test['test_loss'].append(test_loss)
+    #     metrics_test['test_rel_error'].append(test_rel_error)
+    #
+    #     print('Test: epoch {}, loss: {:.4f}, test abs error: {:.4f}, test rel error: {:.4f}'.format(epoch,
+    #                                                                                               test_loss,
+    #                                                                                               test_abs_error,
+    #                                                                                               test_rel_error))
+    # elif TASK == 'depth_segmentation':
+    #     metrics_test = {'test_loss': [],
+    #                     'test_abs_error': [],
+    #                     'test_rel_error': [],
+    #                     'test_acc': [],
+    #                     'test_miou': []}
+    #     test_loss, test_abs_error, test_rel_error, test_acc, test_miou = static_test_single_task(0, criterion, semisup_loss, unsup_loss,
+    #                                                                                              val_dataloader, model, TASK, SAMPLES_PATH,
+    #                                                                                              cfg, save_val_imgs=False)
+    #     metrics_test['test_abs_error'].append(test_abs_error)
+    #     metrics_test['test_loss'].append(test_loss)
+    #     metrics_test['test_acc'].append(test_acc)
+    #     metrics_test['test_miou'].append(test_miou)
+    #
+    #     print('Test: epoch {}, loss: {:.4f}, abs error: {:.4f}, '
+    #           'rel error: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch,
+    #                                                                 test_loss,
+    #                                                                 test_abs_error,
+    #                                                                 test_rel_error,
+    #                                                                 test_acc,
+    #                                                                 test_miou))
     # Track the metrics in mlflow
     # for key, value in metrics_test.items():
     #     mlflow.log_metric(key, value[-1])

@@ -73,24 +73,24 @@ def static_single_task_trainer(epoch, criterion, semisup_loss, unsup_loss, train
 
         output = model(inputs)
 
-        if semisup_loss['Mode']:
-            # unlabelled_pred_task is the predictions of the unlabelled frames through perturbed decoders (list)
-            semi_supervised_output = output['semi_supervised'] # list of 3 atm [[8, 2, 19, 128, 256], [8, 2, 19, 128, 256],..]
-            # main_pred_task = output['supervised']  # [8, 19, 128, 256]
-            main_pred_task = semi_supervised_output[1]
-            perturbed_unlabelled_pred = semi_supervised_output[2]
-            # Compute semi supervised loss
-            loss_semi_sup = sum([semisup_loss['Function'](inputs=u, targets=main_pred_task, conf_mask=False,
-                                                          threshold=0.5, use_softmax=False) for u in perturbed_unlabelled_pred])
-            loss_semi_sup = (loss_semi_sup / len(perturbed_unlabelled_pred))
-            weight_u = semisup_loss['Weights'](epoch=semisup_loss['Epochs'], curr_iter=epoch)
-            loss_semi_sup = loss_semi_sup * weight_u
-
-        if unsup_loss['Mode']:
-            slow_encoded_output = output['encoded_slow']
-            fast_encoded_output = output['encoded_fast']
-            # add regularization to encoders for similar representation
-            loss_unsup = unsup_loss['Function'](slow_encoded_output, fast_encoded_output)
+        # if semisup_loss['Mode']:
+        #     # unlabelled_pred_task is the predictions of the unlabelled frames through perturbed decoders (list)
+        #     semi_supervised_output = output['semi_supervised'] # list of 3 atm [[8, 2, 19, 128, 256], [8, 2, 19, 128, 256],..]
+        #     # main_pred_task = output['supervised']  # [8, 19, 128, 256]
+        #     main_pred_task = semi_supervised_output[1]
+        #     perturbed_unlabelled_pred = semi_supervised_output[2]
+        #     # Compute semi supervised loss
+        #     loss_semi_sup = sum([semisup_loss['Function'](inputs=u, targets=main_pred_task, conf_mask=False,
+        #                                                   threshold=0.5, use_softmax=False) for u in perturbed_unlabelled_pred])
+        #     loss_semi_sup = (loss_semi_sup / len(perturbed_unlabelled_pred))
+        #     weight_u = semisup_loss['Weights'](epoch=semisup_loss['Epochs'], curr_iter=epoch)
+        #     loss_semi_sup = loss_semi_sup * weight_u
+        #
+        # if unsup_loss['Mode']:
+        #     slow_encoded_output = output['encoded_slow']
+        #     fast_encoded_output = output['encoded_fast']
+        #     # add regularization to encoders for similar representation
+        #     loss_unsup = unsup_loss['Function'](slow_encoded_output, fast_encoded_output)
 
         if task == 'segmentation':
             task_pred = output['supervised']
@@ -201,7 +201,7 @@ def static_single_task_trainer(epoch, criterion, semisup_loss, unsup_loss, train
         return loss_running.avg, mean_acc, mean_miou
     return loss_running.avg, abs_error_running.avg, rel_error_running.avg, mean_acc, mean_miou
 
-def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loader, single_task_model, task, folder, cfg, save_val_imgs=None):
+def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loader, single_task_model, task, folder, cfg, save_val_imgs=True):
     # evaluating test data
     # SAMPLES_PATH
     batch_time = AverageMeter('Time', ':6.3f')
@@ -253,25 +253,25 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
             gt_depth = depth.to(device)
             output = single_task_model(inputs)
 
-            if semisup_loss['Mode']:
-                # unlabelled_pred_task is the predictions of the unlabelled frames through perturbed decoders (list)
-                semi_supervised_output = output['semi_supervised']  # list of 3 atm [[8, 2, 19, 128, 256], [8, 2, 19, 128, 256],..]
-                # main_pred_task = output['supervised']  # [8, 19, 128, 256]
-                main_pred_task = semi_supervised_output[1]
-                perturbed_unlabelled_pred = semi_supervised_output[2]
-                # Compute semi supervised loss
-                loss_semi_sup = sum([semisup_loss['Function'](inputs=u, targets=main_pred_task, conf_mask=False,
-                                                              threshold=0.5, use_softmax=False) for u in
-                                                              perturbed_unlabelled_pred])
-                loss_semi_sup = (loss_semi_sup / len(perturbed_unlabelled_pred))
-                weight_u = semisup_loss['Weights'](epoch=semisup_loss['Epochs'], curr_iter=epoch)
-                loss_semi_sup = loss_semi_sup * weight_u
-
-            if unsup_loss['Mode']:
-                slow_encoded_output = output['encoded_slow']
-                fast_encoded_output = output['encoded_fast']
-                # add regularization to encoders for similar representation
-                loss_unsup = unsup_loss['Function'](slow_encoded_output, fast_encoded_output)
+            # if semisup_loss['Mode']:
+            #     # unlabelled_pred_task is the predictions of the unlabelled frames through perturbed decoders (list)
+            #     semi_supervised_output = output['semi_supervised']  # list of 3 atm [[8, 2, 19, 128, 256], [8, 2, 19, 128, 256],..]
+            #     # main_pred_task = output['supervised']  # [8, 19, 128, 256]
+            #     main_pred_task = semi_supervised_output[1]
+            #     perturbed_unlabelled_pred = semi_supervised_output[2]
+            #     # Compute semi supervised loss
+            #     loss_semi_sup = sum([semisup_loss['Function'](inputs=u, targets=main_pred_task, conf_mask=False,
+            #                                                   threshold=0.5, use_softmax=False) for u in
+            #                                                   perturbed_unlabelled_pred])
+            #     loss_semi_sup = (loss_semi_sup / len(perturbed_unlabelled_pred))
+            #     weight_u = semisup_loss['Weights'](epoch=semisup_loss['Epochs'], curr_iter=epoch)
+            #     loss_semi_sup = loss_semi_sup * weight_u
+            #
+            # if unsup_loss['Mode']:
+            #     slow_encoded_output = output['encoded_slow']
+            #     fast_encoded_output = output['encoded_fast']
+            #     # add regularization to encoders for similar representation
+            #     loss_unsup = unsup_loss['Function'](slow_encoded_output, fast_encoded_output)
 
 
             if task == 'segmentation':
@@ -282,13 +282,18 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 gt_semantic_labels = gt_semantic_labels.cpu().numpy()
                 metrics.update(gt_semantic_labels, task_pred)
 
+                curr_mean_acc = metrics.get_results()['Mean Acc']
+                curr_mean_iou = metrics.get_results()['Mean IoU']
+
                 bs = inputs.size(0)
                 total_loss = total_loss.item()
                 loss_running.update(total_loss, bs)
+                acc_running.update(curr_mean_acc, bs)
+                miou_running.update(curr_mean_iou, bs)
 
                 iou.evaluateBatch(task_pred, gt_semantic_labels)
                 # Save visualizations of first batch
-                if save_val_imgs is not None and batch_idx == 0:
+                if save_val_imgs and batch_idx == 0:
                     # get the images from the T dimension that have predicitons on them so last frame in T
                     inputs = inputs[:, -1]
                     filepath = filepath[-1]  # this gets the batch of labelled images with annotations
@@ -311,7 +316,7 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 rel_error_running.update(rel_err)
 
                 # Save visualizations of first batch
-                if save_val_imgs is not None and batch_idx == 0:
+                if save_val_imgs and batch_idx == 0:
                     inputs_annotated = inputs[:, -1]
                     filepath = filepath[-1]
                     save_visualization_depth(inputs_annotated, task_pred, gt_depth, filepath, folder, epoch)
@@ -327,6 +332,11 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 depth_pred = depth_pred.unsqueeze(1)
                 seg_pred = output['supervised'][1]
                 gt_depth = gt_depth[:, -1]  # get the last frame
+
+                print(seg_pred.shape)
+                print(depth_pred.shape)
+                print(gt_semantic_labels.shape)
+                print(gt_depth.shape)
                 # depth_pred, seg_pred = single_task_model(inputs)
                 seg_loss = criterion[1](seg_pred, gt_semantic_labels)
                 depth_loss = criterion[0](depth_pred, gt_depth)
@@ -341,6 +351,9 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 gt_semantic_labels = gt_semantic_labels.cpu().numpy()
                 metrics.update(gt_semantic_labels, seg_pred)
 
+                curr_mean_acc = metrics.get_results()['Mean Acc']
+                curr_mean_iou = metrics.get_results()['Mean IoU']
+
                 bs = inputs.size(0)  # current batch size
                 loss = total_loss.item()
                 loss_running.update(loss, bs)
@@ -348,13 +361,16 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 abs_err, rel_err = depth_error2(depth_pred, gt_depth)
                 abs_error_running.update(abs_err)
                 rel_error_running.update(rel_err)
+                acc_running.update(curr_mean_acc, bs)
+                miou_running.update(curr_mean_iou, bs)
 
                 # Save visualizations of first batch
-                if batch_idx == 0 and save_val_imgs is not None:
+                if batch_idx == 0 and save_val_imgs:
+                    print('gathering images')
                     inputs = inputs[:, -1]
                     filepath = filepath[-1]  # this gets the batch of labelled images with annotations
                     save_val_results_seg(inputs, gt_semantic_labels, seg_pred, test_loader, folder, filepath, epoch)
-                    save_visualization_depth(inputs, task_pred, depth_pred, filepath, folder, epoch)
+                    save_visualization_depth(inputs, depth_pred, gt_depth, filepath, folder, epoch)
                     # imgs = inputs.data.cpu().numpy()
                     # gt_depth_ = gt_depth.data.cpu().numpy()
                     # pred_depth_ = depth_pred.data.cpu().numpy()
@@ -377,18 +393,19 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
     if task == 'segmentation':
         miou = iou.outputScores(folder)
         result = metrics.get_results()
-        print('Accuracy      : {:5.3f}'.format(result['Mean Acc']))
-        print('Miou      : {:5.3f}'.format(result['Mean IoU']))
+        print('Accuracy      : {:5.3f}'.format(acc_running.avg))
+        print('Miou      : {:5.3f}'.format(miou_running.avg))
         print('---------------------')
-        return result['Mean Acc'], loss_running.avg, result['Mean IoU']
+        return acc_running.avg, loss_running.avg, miou_running.avg
     # output for multi task learning
     miou = iou.outputScores(folder)
+    result = metrics.get_results()
     print('Abs. Error      : {:5.3f}'.format(abs_error_running.avg))
     print('Rel Error      : {:5.3f}'.format(rel_error_running.avg))
     print('Accuracy      : {:5.3f}'.format(acc_running.avg))
     print('Miou      : {:5.3f}'.format(miou_running.avg))
     print('---------------------')
-    return loss_running.avg, abs_error_running.avg, rel_error_running.avg, acc_running.avg, miou_running.avg
+    return loss_running.avg, abs_error_running.avg, rel_error_running.avg, acc_running.avg , miou_running.avg
 
 
 

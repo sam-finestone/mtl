@@ -113,7 +113,19 @@ class temporalLoader(data.Dataset):
     train_id_to_color.append([0, 0, 0])
     train_id_to_color = np.array(train_id_to_color)
     id_to_train_id = np.array([c.train_id for c in classes])
-
+    # print(id_to_train_id)
+    id_to_train_id[np.where(id_to_train_id == 255)] = 19
+    # print(id_to_train_id)
+    valid_class = np.unique([c.train_id for c in classes if c.id >= 0])
+    # print(valid_class)
+    valid_class[np.where(valid_class == 255)] = 19
+    print(valid_class)
+    valid_class = list(valid_class)
+    class_label = [c.name for c in classes if not (c.ignore_in_eval or c.id < 0)]
+    class_label.append('void')
+    print(class_label)
+    # print(list(validClasses))
+    # print(list(id_to_train_id))
     # train_id_to_color = [(0, 0, 0), (128, 64, 128), (70, 70, 70), (153, 153, 153), (107, 142, 35),
     #                      (70, 130, 180), (220, 20, 60), (0, 0, 142)]
     # train_id_to_color = np.array(train_id_to_color)
@@ -160,27 +172,27 @@ class temporalLoader(data.Dataset):
         # print(self.files['train'][:50])
         # print(self.seg_files['train'])
         self.void_classes = [0, 1, 2, 3, 4, 5, 6, 9, 10, 14, 15, 16, 18, 29, 30, -1]
-        self.valid_classes = [
-            7,
-            8,
-            11,
-            12,
-            13,
-            17,
-            19,
-            20,
-            21,
-            22,
-            23,
-            24,
-            25,
-            26,
-            27,
-            28,
-            31,
-            32,
-            33,
-        ]
+        # self.valid_classes = [
+        #     7,
+        #     8,
+        #     11,
+        #     12,
+        #     13,
+        #     17,
+        #     19,
+        #     20,
+        #     21,
+        #     22,
+        #     23,
+        #     24,
+        #     25,
+        #     26,
+        #     27,
+        #     28,
+        #     31,
+        #     32,
+        #     33,
+        # ]
         self.class_names = [
             "road",
             "sidewalk",
@@ -201,7 +213,9 @@ class temporalLoader(data.Dataset):
             "train",
             "motorcycle",
             "bicycle",
+            "void"
         ]
+        self.valid_classes = np.array([i for i in range(20)])
         self.depth_transform_train = transforms.Compose([
             transforms.Resize((128, 256)),
             # transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
@@ -237,8 +251,8 @@ class temporalLoader(data.Dataset):
         ])
 
 
-        self.ignore_index = 19
-        self.class_map = dict(zip(self.valid_classes, range(19)))
+        self.ignore_class = 19
+        # self.class_map = dict(zip(self.valid_classes, range(19)))
         self.img_transform = transforms.Compose([transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])])
 
         if not self.files[split]:
@@ -255,6 +269,14 @@ class temporalLoader(data.Dataset):
         target[target == 255] = 19
         # target = target.astype('uint8') + 1
         return cls.train_id_to_color[target]
+
+    @classmethod
+    def cls_names(cls):
+        return cls.class_label
+
+    @classmethod
+    def vlid_classes(cls):
+        return cls.valid_class
 
     def __len__(self):
         """__len__"""

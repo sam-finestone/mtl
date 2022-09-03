@@ -54,28 +54,17 @@ class TemporalModel2(nn.Module):
         input_dim_decoder = 256
         list_kf_indicies = [x for x in range(window_interval) if x % self.K == 0]
         list_non_kf_indicies = list(set(range(window_interval)) - set(list_kf_indicies))
-
         if version == 'sum_fusion':
             input_dim_decoder = 256
         if version == 'convnet_fusion':
             # number of keyframes + last_fast + annotated_frame
-            if len(list_kf_indicies) > len(list_non_kf_indicies):
-                if len(list_kf_indicies) > 1:
-                    t_dim = len(list_kf_indicies) + 1
-                else:
-                    t_dim = 2
-            else:
-                if len(list_non_kf_indicies) > 1:
-                    t_dim = len(list_kf_indicies) + 2
-                else:
-                    t_dim = 2
             input_dim_decoder = 256
             self.with_se_block = False
             # self.se_layer = SE_Layer(input_dim_decoder, 2)
             if self.causal_conv:
                 self.convnet_fusion_layer = nn.Conv3d(input_dim_decoder, 256, kernel_size=(4, 1, 1), stride=1)
             if not self.causal_conv:
-                self.convnet_fusion_layer = nn.Conv3d(input_dim_decoder, 256, kernel_size=(t_dim, 1, 1), stride=1)
+                self.convnet_fusion_layer = nn.Conv3d(input_dim_decoder, 256, kernel_size=(3, 1, 1), stride=1)
 
         # elif version == 'global_atten_fusion':
         #     input_dim_t = 256
@@ -144,14 +133,12 @@ class TemporalModel2(nn.Module):
 
     def forward(self, input):
         # [b, t, c, h, w]
-        # Get the keyframes and non-keyframes for slow/fast setting
-        # print('input shape: ' + str(input.shape))  # - torch.Size([4, 5, 3, 128, 256])
-        keyframes, non_keyframes, list_kf_indicies, list_non_kf_indicies = self.get_keyframes(input)
-
-        # check if we are to using regularise the encoders then need the output of all frames in encoder
+        #print(input.shape) # torch.Size([4, 3, 3, 128, 256])
         enc_ftrs, batch_size, t_dim = self.run_encoder(input, self.shared_encoder)
         output_ftrs = self.reshape_output(enc_ftrs, batch_size, t_dim)
-
+        # print(output_ftrs.shape) # torch.Size([4, 3, 256, 8, 16])
+        print(output_ftrs[:, 0].shape)
+        print(output_ftrs[:, 2].shape)
         # if self.version == 'global_atten_fusion':
         #     task_predictions = self.global_attention_fusion(output_slow, output_fast, list_kf_indicies,
         #                                                     list_non_kf_indicies, mulit_task=self.multi_task)
@@ -159,29 +146,6 @@ class TemporalModel2(nn.Module):
         #     task_predictions = self.local_attention_fusion(output_slow, output_fast, list_kf_indicies,
         #                                                    list_non_kf_indicies, mulit_task=self.multi_task)
         # last frame is a keyframe frame (slow encoded)
-
-        index_of_labelled_frame = 0
-        # annotated_frame = {'last_frame': [], 'type': []}
-        # if max(list_kf_indicies) > max(list_non_kf_indicies):
-        #     index_of_labelled_frame = len(list_kf_indicies) - 1
-        #     if len(list_kf_indicies) > 1:
-        #         annotated_frame['last_frame'].append(output_slow[:, -1].unsqueeze(1))
-        #         annotated_frame['type'].append('slow_frame')
-        #         output_slow = output_slow[:, :-1]
-        #     else:
-        #         annotated_frame['last_frame'].append(None)
-        #         annotated_frame['type'].append('slow_frame')
-        # # last frame is a keyframe frame (fast encoded)
-        # else:
-        #     index_of_labelled_frame = len(list_kf_indicies) + len(list_non_kf_indicies) - 1
-        #     if len(list_non_kf_indicies) > 1:
-        #         annotated_frame['last_frame'].append(output_fast[:, -1].unsqueeze(1))
-        #         annotated_frame['type'].append('fast_frame')
-        #         output_fast = output_fast[:, :-1]
-        #     else:
-        #         annotated_frame['last_frame'].append(None)
-        #         annotated_frame['type'].append('fast_frame')
-
         task_predictions = 0
         if not self.multi_task:
             # Different ways of propagating temporal features
@@ -231,7 +195,6 @@ class TemporalModel2(nn.Module):
                 enc_ftrs = self.add_casaul_module(enc_ftrs)
 
             x_fusion = torch.sum(enc_ftrs, dim=1).squeeze(1)
-            # print(x_fusion.shape)
             task_predictions = self.task_decoder(x_fusion)
             task_predictions = task_predictions.squeeze(1)
         else:

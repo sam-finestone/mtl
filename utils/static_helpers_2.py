@@ -65,7 +65,7 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
         # torch.Size([8, 1, 256, 512])
         gt_semantic_labels = labels.to(device, dtype=torch.long)
         # torch.Size([8, 3, 256, 512])
-        gt_depth = depth.to(device)
+        gt_depth = depth.to(device, dtype=torch.float32)
         if task == 'segmentation':
             task_pred = model(inputs)
             loss = criterion(task_pred, gt_semantic_labels)
@@ -86,7 +86,7 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             loss_running.update(loss, bs)
             acc_running.update(curr_mean_acc, bs)
             miou_running.update(curr_mean_iou, bs)
-            # iou.evaluateBatch(task_pred, gt_semantic_labels)
+
 
         if task == 'depth':
             task_pred = model(inputs)
@@ -138,7 +138,7 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             loss_running.update(total_loss, bs)
             acc_running.update(curr_mean_acc, bs)
             miou_running.update(curr_mean_iou, bs)
-            # iou.evaluateBatch(seg_pred, gt_semantic_labels)
+
             # get depth metric
             # abs_err, rel_err = depth_error(depth_pred, gt_depth)
             abs_err, rel_err = depth_error2(depth_pred, gt_depth)
@@ -173,7 +173,8 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
     return loss_running.avg, abs_error_running.avg, rel_error_running.avg, mean_acc, mean_miou
 
 
-def static_test_single_task(epoch, criterion, test_loader, single_task_model, task, folder, save_val_imgs=True):
+def static_test_single_task(epoch, criterion, test_loader, single_task_model, task, classLabels, validClasses,
+                            folder, void=0, maskColors=None, save_val_imgs=None):
     # evaluating test data
     # SAMPLES_PATH
     batch_time = AverageMeter('Time', ':6.3f')
@@ -186,10 +187,7 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
     metrics = StreamSegMetrics(19)
 
     if task == 'segmentation':
-        validClasses = test_loader.dataset.valid_classes
-        classLabels = test_loader.dataset.class_names
-        void = 19
-        iou = iouCalc(classLabels, validClasses, voidClass=void)
+        # iou = iouCalc(classLabels, validClasses, voidClass=void)
         progress = ProgressMeter(
             len(test_loader),
             [batch_time, data_time, loss_running, acc_running, miou_running],
@@ -202,10 +200,7 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
             prefix="Train, epoch: [{}]".format(epoch))
 
     if task == 'depth_segmentation':
-        validClasses = test_loader.dataset.valid_classes
-        classLabels = test_loader.dataset.class_names
-        void = 19
-        iou = iouCalc(classLabels, validClasses, voidClass=void)
+        # iou = iouCalc(classLabels, validClasses, voidClass=void)
         progress = ProgressMeter(
             len(test_loader),
             [batch_time, data_time, loss_running, abs_error_running, rel_error_running, acc_running, miou_running],
@@ -221,21 +216,18 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
             inputs = inputs.to(device, dtype=torch.float32)
             gt_semantic_labels = labels.to(device, dtype=torch.long)
             gt_depth = depth.to(device)
-
+            task_pred = single_task_model(inputs)
             if task == 'segmentation':
-                task_pred = single_task_model(inputs)
                 loss = criterion(task_pred, gt_semantic_labels)
+
                 task_pred = task_pred.detach().max(dim=1)[1].cpu().numpy()
                 gt_semantic_labels = gt_semantic_labels.cpu().numpy()
                 metrics.update(gt_semantic_labels, task_pred)
-                curr_mean_acc = metrics.get_results()['Mean Acc']
-                curr_mean_iou = metrics.get_results()['Mean IoU']
+
                 bs = inputs.size(0)
                 loss = loss.item()
                 loss_running.update(loss, bs)
-                acc_running.update(curr_mean_acc, bs)
-                miou_running.update(curr_mean_iou, bs)
-                iou.evaluateBatch(task_pred, gt_semantic_labels)
+
                 # miou_score = compute_miou(task_pred, gt_semantic_labels).item()
                 # miou_running.update(miou_score)
                 # task_pred = torch.argmax(task_pred, dim=1)
@@ -249,9 +241,8 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                 # iou.evaluateBatch(task_pred, gt_semantic_labels)
 
                 # Save visualizations of first batch
-                if batch_idx == 0 and save_val_imgs:
-                    save_val_results_seg(inputs, gt_semantic_labels, task_pred, test_loader, folder, filepath, epoch)
-                    # img_id = save_val_results_seg(inputs, gt_semantic_labels, task_pred, img_id, test_loader, folder)
+                if batch_idx == 0 and save_val_imgs is not None:
+                    img_id = save_val_results_seg(inputs, gt_semantic_labels, task_pred, img_id, test_loader, folder)
                     # imgs = inputs.data.cpu().numpy()
                     # for i in range(inputs.size(0)):
                     #     filename = filepath[i]
@@ -260,7 +251,6 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
 
 
             if task == 'depth':
-                task_pred = single_task_model(inputs)
                 loss = criterion(task_pred, gt_depth)
                 bs = inputs.size(0)  # current batch size
                 loss = loss.item()
@@ -271,7 +261,7 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                 rel_error_running.update(rel_err)
 
                 # Save visualizations of first batch
-                if batch_idx == 0 and save_val_imgs:
+                if batch_idx == 0 and save_val_imgs is not None:
                     imgs = inputs.data.cpu().numpy()
                     gt_depth_ = gt_depth.data.cpu().numpy()
                     pred_depth_ = task_pred.data.cpu().numpy()
@@ -300,16 +290,10 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                 abs_err, rel_err = depth_error2(depth_pred, gt_depth)
                 abs_error_running.update(abs_err)
                 rel_error_running.update(rel_err)
-                curr_mean_acc = metrics.get_results()['Mean Acc']
-                curr_mean_iou = metrics.get_results()['Mean IoU']
-                acc_running.update(curr_mean_acc, bs)
-                miou_running.update(curr_mean_iou, bs)
-                iou.evaluateBatch(seg_pred, gt_semantic_labels)
 
                 # Save visualizations of first batch
-                if batch_idx == 0 and save_val_imgs:
-                    save_val_results_seg(inputs, gt_semantic_labels, seg_pred, test_loader, folder, filepath, epoch)
-                    # img_id = save_val_results_seg(inputs, gt_semantic_labels, seg_pred, img_id, test_loader, folder)
+                if batch_idx == 0 and save_val_imgs is not None:
+                    img_id = save_val_results_seg(inputs, gt_semantic_labels, seg_pred, img_id, test_loader, folder)
                     imgs = inputs.data.cpu().numpy()
                     gt_depth_ = gt_depth.data.cpu().numpy()
                     pred_depth_ = depth_pred.data.cpu().numpy()
@@ -331,14 +315,13 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
         return rel_error_running.avg, abs_error_running.avg, loss_running.avg
 
     if task == 'segmentation':
-        miou = iou.outputScores(folder)
+        # miou = iou.outputScores()
         result = metrics.get_results()
-        print('Accuracy      : {:5.3f}'.format(acc_running.avg))
-        print('Miou      : {:5.3f}'.format(miou_running.avg))
+        print('Accuracy      : {:5.3f}'.format(result['Mean Acc']))
+        print('Miou      : {:5.3f}'.format(result['Mean IoU']))
         print('---------------------')
         return result['Mean Acc'], loss_running.avg, result['Mean IoU']
     # output for multi task learning
-    miou = iou.outputScores(folder)
     print('Abs. Error      : {:5.3f}'.format(abs_error_running.avg))
     print('Rel Error      : {:5.3f}'.format(rel_error_running.avg))
     print('Accuracy      : {:5.3f}'.format(acc_running.avg))
@@ -358,21 +341,20 @@ def lin_interp(shape, xyd):
     disparity = f(IJ).reshape(shape)
     return disparity
 
-
-def save_val_results_seg(images, gt_semantic_labels, task_pred, loader, img_save_path, filename, epoch):
+def save_val_results_seg(images, gt_semantic_labels, task_pred, img_id, loader, img_save_path):
     denorm = Denormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     for i in range(len(images)):
         image = images[i].detach().cpu().numpy()
         target = gt_semantic_labels[i]
         pred = task_pred[i]
-        file = filename[i]
+
         image = (denorm(image) * 255).transpose(1, 2, 0).astype(np.uint8)
         target = loader.dataset.decode_target(target).astype(np.uint8)
         pred = loader.dataset.decode_target(pred).astype(np.uint8)
 
-        Image.fromarray(image).save(img_save_path + '/images/{}_epoch_{}_img_seg.png'.format(file, epoch))
-        Image.fromarray(target).save(img_save_path + '/images/{}_epoch_{}_target_seg.png'.format(file, epoch))
-        Image.fromarray(pred).save(img_save_path + '/images/{}_epoch_{}_pred_seg.png'.format(file, epoch))
+        Image.fromarray(image).save(os.path.join(img_save_path, '%d_image_seg.png' % img_id))
+        Image.fromarray(target).save(os.path.join(img_save_path, '%d_target_seg.png' % img_id))
+        Image.fromarray(pred).save(os.path.join(img_save_path, '%d_pred_seg.png' % img_id))
 
         fig = plt.figure()
         plt.imshow(image)
@@ -381,34 +363,10 @@ def save_val_results_seg(images, gt_semantic_labels, task_pred, loader, img_save
         ax = plt.gca()
         ax.xaxis.set_major_locator(matplotlib.ticker.NullLocator())
         ax.yaxis.set_major_locator(matplotlib.ticker.NullLocator())
-        plt.savefig(img_save_path + '/images/{}_epoch_{}_overlay_seg.png'.format(file, epoch), bbox_inches='tight', pad_inches=0)
+        plt.savefig(os.path.join(img_save_path, '%d_overlay.png' % img_id), bbox_inches='tight', pad_inches=0)
         plt.close()
-# def save_val_results_seg(images, gt_semantic_labels, task_pred, img_id, loader, img_save_path):
-#     denorm = Denormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-#     for i in range(len(images)):
-#         image = images[i].detach().cpu().numpy()
-#         target = gt_semantic_labels[i]
-#         pred = task_pred[i]
-#
-#         image = (denorm(image) * 255).transpose(1, 2, 0).astype(np.uint8)
-#         target = loader.dataset.decode_target(target).astype(np.uint8)
-#         pred = loader.dataset.decode_target(pred).astype(np.uint8)
-#
-#         Image.fromarray(image).save(os.path.join(img_save_path, '%d_image_seg.png' % img_id))
-#         Image.fromarray(target).save(os.path.join(img_save_path, '%d_target_seg.png' % img_id))
-#         Image.fromarray(pred).save(os.path.join(img_save_path, '%d_pred_seg.png' % img_id))
-#
-#         fig = plt.figure()
-#         plt.imshow(image)
-#         plt.axis('off')
-#         plt.imshow(pred, alpha=0.7)
-#         ax = plt.gca()
-#         ax.xaxis.set_major_locator(matplotlib.ticker.NullLocator())
-#         ax.yaxis.set_major_locator(matplotlib.ticker.NullLocator())
-#         plt.savefig(os.path.join(img_save_path, '%d_overlay.png' % img_id), bbox_inches='tight', pad_inches=0)
-#         plt.close()
-#         img_id += 1
-#     return img_id
+        img_id += 1
+    return img_id
 
 def save_visualization_segmentation(index, epoch, imgs, seg_pred, gt_semantic_labels, maskColors, filename, folder):
     denorm = Denormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])

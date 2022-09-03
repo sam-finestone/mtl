@@ -1,5 +1,5 @@
 model:
-    arch: slowfast 
+    arch: slowfast
     backbone:
         encoder:
             type: deeplabv3
@@ -8,8 +8,8 @@ model:
     path_num: 2
     window_size: 5
     frames_per_segment: 48
-    tasks: segmentation # depth or segmentation
-    task_classes: 19
+    tasks: depth # depth or segmentation
+    task_classes: 1
 
 data:
     dataset: cityscapes
@@ -24,7 +24,7 @@ training:
     n_workers: 24
     train_iters: 200
     batch_size: 16
-    val_interval: 10
+    val_interval: 25
     print_interval: 2
     pretrain: True
     loss:

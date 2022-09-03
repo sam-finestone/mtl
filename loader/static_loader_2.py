@@ -106,17 +106,6 @@ class staticLoader(data.Dataset):
     train_id_to_color.append([0, 0, 0])
     train_id_to_color = np.array(train_id_to_color)
     id_to_train_id = np.array([c.train_id for c in classes])
-    # print(id_to_train_id)
-    id_to_train_id[np.where(id_to_train_id == 255)] = 19
-    # print(id_to_train_id)
-    valid_class = np.unique([c.train_id for c in classes if c.id >= 0])
-    # print(valid_class)
-    valid_class[np.where(valid_class == 255)] = 19
-    print(valid_class)
-    valid_class = list(valid_class)
-    class_label = [c.name for c in classes if not (c.ignore_in_eval or c.id < 0)]
-    class_label.append('void')
-    print(class_label)
 
     # train_id_to_color = [(0, 0, 0), (128, 64, 128), (70, 70, 70), (153, 153, 153), (107, 142, 35),
     #                      (70, 130, 180), (220, 20, 60), (0, 0, 142)]
@@ -159,27 +148,27 @@ class staticLoader(data.Dataset):
         # print(self.files[split][:500])
         # self.frame_start_indices = self.get_start_indices()
         self.void_classes = [0, 1, 2, 3, 4, 5, 6, 9, 10, 14, 15, 16, 18, 29, 30]
-        # self.valid_classes = [
-        #     7,
-        #     8,
-        #     11,
-        #     12,
-        #     13,
-        #     17,
-        #     19,
-        #     20,
-        #     21,
-        #     22,
-        #     23,
-        #     24,
-        #     25,
-        #     26,
-        #     27,
-        #     28,
-        #     31,
-        #     32,
-        #     33,
-        # ]
+        self.valid_classes = [
+            7,
+            8,
+            11,
+            12,
+            13,
+            17,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            31,
+            32,
+            33,
+        ]
         self.class_names = [
             "road",
             "sidewalk",
@@ -200,17 +189,16 @@ class staticLoader(data.Dataset):
             "train",
             "motorcycle",
             "bicycle",
-            "void"
         ]
-        self.valid_classes = np.array([i for i in range(20)])
-        # with open('/home/sam/project/loader/cityscape_info.json', 'r') as fr:
-        #     labels_info = json.load(fr)
-        # self.lb_map = {el['id']: el['trainId'] for el in labels_info}
-        # self.lb_colors = {el['trainId']: el['color'] for el in labels_info}
-        self.num_classes = 19
+
+        with open('/home/sam/project/loader/cityscape_info.json', 'r') as fr:
+            labels_info = json.load(fr)
+        self.lb_map = {el['id']: el['trainId'] for el in labels_info}
+        self.lb_colors = {el['trainId']: el['color'] for el in labels_info}
+        self.num_classes = len(self.lb_map)
         # print(len(self.lb_map))
         # https://github.com/lorenmt/auto-lambda/blob/24591b7ff0d4498b18bd4b4c85c41864bdfc800a/create_dataset.py#L173
-        self.ignore_class = 19
+        self.ignore_index = 19
         self.depth_transform_train = transforms.Compose([
                                                     transforms.Resize((128, 256)),
                                                     # transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
@@ -317,34 +305,27 @@ class staticLoader(data.Dataset):
 
         # print(depth_normalized.max()) - 1.0
         # print(depth_normalized.min()) - -1.0
-        if self.split == 'train':
-            depth_labels = self.depth_transform_train(depth_img)
-            depth_normalized = self.map_disparity(depth_labels.float()).float()
-        else:
-            depth_labels = self.depth_transform_val(depth_img)
-            depth_normalized = self.map_disparity(depth_labels.float()).float()
-
         if self.split == 'val' or self.split == 'test':
             # _, depth_labels = self.transform(image_pil, depth_img)
-            # depth_labels = self.depth_transform_val(depth_img)
-            # # depth_labels = transforms.ToTensor()(depth_labels)
-            # # depth_labels[depth_labels == 0] = -1
-            # # disparity = torch.from_numpy(self.map_disparity(depth_labels.float())).unsqueeze(0).float()
-            # depth_normalized = self.map_disparity(depth_labels.float()).float()
-            # # depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
-            # # depth_normalized = depth_labels.float()
+            depth_labels = self.depth_transform_val(depth_img)
+            # depth_labels = transforms.ToTensor()(depth_labels)
+            # depth_labels[depth_labels == 0] = -1
+            # disparity = torch.from_numpy(self.map_disparity(depth_labels.float())).unsqueeze(0).float()
+            depth_normalized = self.map_disparity(depth_labels.float()).float()
+            # depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
+            # depth_normalized = depth_labels.float()
             img_path = "%s_%s_%06d_leftImg8bit" % (city, seq, frame_id)
             return image, label_target, depth_normalized, img_path
 
         # depth_labels = self.depth_transform_train(depth_img_tensor)
-        # depth_labels = self.depth_transform_train(depth_img)
+        depth_labels = self.depth_transform_train(depth_img)
         # print(depth_labels.shape)
         # depth_labels = transforms.ToTensor()(depth_labels)
         # depth_labels = np.asarray(depth_labels, dtype="float32")
         # _, depth_labels = self.transform(image_pil, depth_img)
         # disparity = torch.from_numpy(self.map_disparity(depth_labels.float())).unsqueeze(0).float()
         # print(depth_labels.shape)
-        # depth_normalized = self.map_disparity(depth_labels.float()).float()
+        depth_normalized = self.map_disparity(depth_labels.float()).float()
         # print(depth_normalized.shape)
 
         # depth_normalized = (1 - (-1)) * (disparity - disparity.min()) / (disparity.max() - disparity.min()) - 1
