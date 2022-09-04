@@ -130,8 +130,8 @@ def static_single_task_trainer(epoch, criterion, semisup_loss, unsup_loss, train
             loss_running.update(total_loss, bs)
 
             # compute the depth metrics
+            abs_err, rel_err = depth_error(task_pred, gt_depth)
             # abs_err, rel_err = depth_error2(task_pred, gt_depth)
-            abs_err, rel_err = depth_error2(task_pred, gt_depth)
             abs_error_running.update(abs_err)
             rel_error_running.update(rel_err)
 
@@ -169,8 +169,8 @@ def static_single_task_trainer(epoch, criterion, semisup_loss, unsup_loss, train
 
 
             # get depth metric
-            # abs_err, rel_err = depth_error(depth_pred, gt_depth)
-            abs_err, rel_err = depth_error2(depth_pred, gt_depth)
+            abs_err, rel_err = depth_error(depth_pred, gt_depth)
+            # abs_err, rel_err = depth_error2(depth_pred, gt_depth)
             abs_error_running.update(abs_err)
             rel_error_running.update(rel_err)
 
@@ -310,8 +310,8 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 bs = inputs.size(0)  # current batch size
                 total_loss = total_loss.item()
                 loss_running.update(total_loss, bs)
-                abs_err, rel_err = depth_error2(task_pred, gt_depth)
-                # abs_err, rel_err = depth_error(task_pred, gt_depth)
+                # abs_err, rel_err = depth_error2(task_pred, gt_depth)
+                abs_err, rel_err = depth_error(task_pred, gt_depth)
                 abs_error_running.update(abs_err)
                 rel_error_running.update(rel_err)
 
@@ -358,7 +358,7 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 loss = total_loss.item()
                 loss_running.update(loss, bs)
                 iou.evaluateBatch(seg_pred, gt_semantic_labels)
-                abs_err, rel_err = depth_error2(depth_pred, gt_depth)
+                abs_err, rel_err = depth_error(depth_pred, gt_depth)
                 abs_error_running.update(abs_err)
                 rel_error_running.update(rel_err)
                 acc_running.update(curr_mean_acc, bs)

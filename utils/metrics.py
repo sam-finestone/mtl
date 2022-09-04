@@ -320,7 +320,7 @@ def plot_learning_curves(metrics, epochs, val_epochs, save_img_path, task, ):
         ax1.legend(loc="upper right")
         ax2.legend(loc="upper right")
         ax3.legend(loc="upper right")
-        plt.tight_layout()
+        # plt.tight_layout()
         plt.savefig(save_img_path + '/learning_curve.png', bbox_inches='tight')
 
     elif task == 'depth':
@@ -337,7 +337,7 @@ def plot_learning_curves(metrics, epochs, val_epochs, save_img_path, task, ):
         ax2.plot(x_val, metrics['val_abs_error'], color='tab:blue', label='val abs. error')
         ax1.legend(loc="upper right")
         ax2.legend(loc="upper right")
-        plt.tight_layout()
+        # plt.tight_layout()
         plt.savefig(save_img_path + '/learning_curve.png', bbox_inches='tight')
 
     elif task == 'depth_segmentation':
@@ -366,7 +366,7 @@ def plot_learning_curves(metrics, epochs, val_epochs, save_img_path, task, ):
         ax3.grid()
         # lns = ln1 + ln2 + ln3 + ln4
         # plt.legend(lns, ['Train loss', 'Validation loss', 'Train Absolute Error', 'Validation Absolute Error'])
-        fig.tight_layout()
+        # fig.tight_layout()
         fig.savefig(save_img_path + '/learning_curve.png', bbox_inches='tight')
 
 class SegmentationMetrics(object):
