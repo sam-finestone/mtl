@@ -27,7 +27,7 @@ training:
     n_workers: 24
     train_iters: 200
     batch_size: 16
-    val_interval: 25
+    val_interval: 10
     print_interval: 2
     pretrain: True
     loss:

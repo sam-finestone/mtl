@@ -24,7 +24,7 @@ data:
     path: /mnt/c44578a3-8e98-4fc3-a8b4-72266618fb8a/sam_dataset/data/cityscapes_static
 
 training:
-    n_workers: 12
+    n_workers: 18
     train_iters: 1
     batch_size: 8
     val_interval: 1
