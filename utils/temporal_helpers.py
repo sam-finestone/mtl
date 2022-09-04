@@ -495,7 +495,7 @@ def save_visualization_depth(inputs, task_pred, gt_depth, filepath, img_save_pat
         file = filepath[i]
         image = (denorm(image) * 255).transpose(1, 2, 0).astype(np.uint8)
         fig, (axs1, axs2, axs3) = plt.subplots(1, 3)
-        plt.figure(figsize=(10, 10))
+        plt.figure(figsize=(10, 18))
         axs1.imshow(image)
         axs2.imshow(pred)
         plt.title("Disparity prediction", fontsize=22)

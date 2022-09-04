@@ -104,8 +104,8 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             loss_running.update(loss, bs)
 
             # compute the depth metrics
-            # abs_err, rel_err = depth_error(task_pred, gt_depth)
-            abs_err, rel_err = depth_error2(task_pred, gt_depth)
+            abs_err, rel_err = depth_error(task_pred, gt_depth)
+            # abs_err, rel_err = depth_error2(task_pred, gt_depth)
             abs_error_running.update(abs_err)
             rel_error_running.update(rel_err)
 
@@ -140,8 +140,8 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             miou_running.update(curr_mean_iou, bs)
             # iou.evaluateBatch(seg_pred, gt_semantic_labels)
             # get depth metric
-            # abs_err, rel_err = depth_error(depth_pred, gt_depth)
-            abs_err, rel_err = depth_error2(depth_pred, gt_depth)
+            abs_err, rel_err = depth_error(depth_pred, gt_depth)
+            # abs_err, rel_err = depth_error2(depth_pred, gt_depth)
             abs_error_running.update(abs_err)
             rel_error_running.update(rel_err)
 
@@ -265,8 +265,8 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                 bs = inputs.size(0)  # current batch size
                 loss = loss.item()
                 loss_running.update(loss, bs)
-                abs_err, rel_err = depth_error2(task_pred, gt_depth)
-                # abs_err, rel_err = depth_error(task_pred, gt_depth)
+                # abs_err, rel_err = depth_error2(task_pred, gt_depth)
+                abs_err, rel_err = depth_error(task_pred, gt_depth)
                 abs_error_running.update(abs_err)
                 rel_error_running.update(rel_err)
 
@@ -297,7 +297,8 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
                 loss = total_loss.item()
                 loss_running.update(loss, bs)
 
-                abs_err, rel_err = depth_error2(depth_pred, gt_depth)
+                # abs_err, rel_err = depth_error2(depth_pred, gt_depth)
+                abs_err, rel_err = depth_error(depth_pred, gt_depth)
                 abs_error_running.update(abs_err)
                 rel_error_running.update(rel_err)
                 curr_mean_acc = metrics.get_results()['Mean Acc']
