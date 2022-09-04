@@ -56,7 +56,7 @@ def recursive_glob_set(rootdir=".", suffix=""):
         if filename.endswith(suffix)
     )
 
-class temporalLoader(data.Dataset):
+class temporalLoader3(data.Dataset):
     """cityscapesLoader
 
     https://www.cityscapes-dataset.com
@@ -219,12 +219,35 @@ class temporalLoader(data.Dataset):
         self.depth_transform_train = transforms.Compose([
             transforms.Resize((128, 256)),
             # transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
-            # transforms.RandomHorizontalFlip(),
+            transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
         ])
         self.depth_transform_val = transforms.Compose([
             transforms.Resize((128, 256)),
             transforms.ToTensor()
+        ])
+        self.image_transform_train = transforms.Compose([
+            transforms.Resize((128, 256)),
+            transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        ])
+        self.image_transform_val = transforms.Compose([
+            transforms.Resize((128, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        ])
+        self.lbl_transform_train = transforms.Compose([
+            transforms.Resize((128, 256)),
+            transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
+            transforms.RandomHorizontalFlip(),
+
+        ])
+        self.lbl_transform_val = transforms.Compose([
+            transforms.Resize((128, 256)),
         ])
 
 
@@ -294,14 +317,11 @@ class temporalLoader(data.Dataset):
         label_target = self.encode_target(label_target)
         label_target = torch.from_numpy(label_target).long()
         annotated_frame_index = int(cur_frame)
-        # start_index = annotated_frame_index - (self.window_size - 1)
-        # end_index = annotated_frame_index + 1
-        # print('frame_annotated:' + cur_frame)
-        # mask_interested_frames = [0, self.window_size-2, self.window_size-1]
-        # print('start index:' + str(start_index))
-        # print('end index: ' + str(end_index))
-        interested_frames = [annotated_frame_index - self.window_size, annotated_frame_index-1, annotated_frame_index]
-        for index_frame in interested_frames:
+        start_index = annotated_frame_index - (self.window_size - 1)
+        end_index = annotated_frame_index + 1
+        # print(annotated_frame_index)
+        mask_interested_frames = [0, self.window_size-2, self.window_size-1]
+        for index_frame in range(start_index, end_index):
             image_path = os.path.join(self.videos_base, city, ("%s_%s_%06d_leftImg8bit.png" % (city, seq, index_frame)))
             depth_path = os.path.join(self.depth_base, city, ("%s_%s_%06d_disparity.png" % (city, seq, index_frame)))
             # print(image_path)
@@ -335,10 +355,9 @@ class temporalLoader(data.Dataset):
         # segmentation_labels = torch.stack(segmentation_labels, dim=0)
         depth_labels = torch.stack(depth_lbl, dim=0)
         images = torch.stack(images, dim=0)
-        # images = images[mask_interested_frames,:]
-        # depth_labels = depth_labels[mask_interested_frames,:]
-        # img_path_list = [img_path_list[i] for i in mask_interested_frames]
-        # print(img_path_list)
+        images = images[mask_interested_frames,:]
+        depth_labels = depth_labels[mask_interested_frames,:]
+        img_path_list = [img_path_list[i] for i in mask_interested_frames]
         if self.split == 'val' or self.split == 'test':
             return images, label_target, depth_labels, img_path_list
         # print(images.shape) - torch.Size([5, 3, 128, 256])

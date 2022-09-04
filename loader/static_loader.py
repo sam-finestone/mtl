@@ -214,7 +214,7 @@ class staticLoader(data.Dataset):
         self.depth_transform_train = transforms.Compose([
                                                     transforms.Resize((128, 256)),
                                                     # transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
-                                                    transforms.RandomHorizontalFlip(),
+                                                    # transforms.RandomHorizontalFlip(),
                                                     transforms.ToTensor()
                                                  ])
         self.depth_transform_val = transforms.Compose([

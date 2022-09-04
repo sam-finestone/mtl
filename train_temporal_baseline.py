@@ -10,6 +10,7 @@ import logging
 from loader.cityscapes_loader import cityscapesLoader
 from loader.static_loader import staticLoader
 from loader.temporal_loader import temporalLoader
+from loader.temporal_loader_3 import temporalLoader3
 # from loader.video_dataset import *
 from utils.sort_dataset import *
 # from loader.nyuv2_dataloader import NYUV2
@@ -57,16 +58,16 @@ parser.add_argument('-v', '--version', default='sum_fusion', type=str,
 parser.add_argument('-c', '--causal', default=False, type=bool,
                     help='Checking the causal pathway')
 # uncomment for segmentation run
-# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
-#                     nargs="?", type=str, help="Configuration file to use")
+parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
+                    nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for depth run
 # parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_depth',
 #                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for both tasks
-parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
-                    nargs="?", type=str, help="Configuration file to use")
+# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
+#                     nargs="?", type=str, help="Configuration file to use")
 
 args = parser.parse_args()
 with open(args.config) as fp:
@@ -110,7 +111,7 @@ train_transform = et.ExtCompose([
             et.ExtResize((128, 256)),
             # et.ExtRandomCrop(size=(opts.crop_size, opts.crop_size)),
             # et.ExtColorJitter(brightness=0.5, contrast=0.5, saturation=0.5),
-            et.ExtRandomHorizontalFlip(),
+            # et.ExtRandomHorizontalFlip(),
             et.ExtToTensor(),
             et.ExtNormalize(mean=[0.485, 0.456, 0.406],
                             std=[0.229, 0.224, 0.225]),
@@ -395,7 +396,7 @@ with mlflow.start_run():
             metrics['train_loss'].append(train_loss)
             metrics['train_acc'].append(train_acc)
             metrics['train_miou'].append(train_miou)
-            print('Epoch {} train loss: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch,
+            print('Train: epoch {} loss: {:.4f}, acc: {:.4f}, miou: {:.4f}'.format(epoch,
                                                                                   train_loss,
                                                                                   train_acc,
                                                                                   train_miou))
@@ -448,7 +449,7 @@ with mlflow.start_run():
             metrics['train_abs_error'].append(train_abs_err)
             metrics['train_rel_error'].append(train_rel_err)
 
-            print('Epoch {} train loss: {:.4f}, abs error: {:.4f}, val rel error: {:.4f}'.format(epoch,
+            print('Train: epoch {} loss: {:.4f}, abs error: {:.4f}, val rel error: {:.4f}'.format(epoch,
                                                                                                  train_loss,
                                                                                                  train_abs_err,
                                                                                                  train_rel_err))
