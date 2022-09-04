@@ -302,6 +302,7 @@ def plot_learning_curves(metrics, epochs, val_epochs, save_img_path, task, ):
     x_val = np.arange(val_epochs)
     if task == 'segmentation':
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+        plt.figure(figsize=(24, 8))
         ax1.set_xlabel('Epochs')
         ax1.set_ylabel('Loss')
         ax1.plot(x_train, metrics['train_loss'], color='tab:red', label='Train loss')
@@ -325,6 +326,7 @@ def plot_learning_curves(metrics, epochs, val_epochs, save_img_path, task, ):
 
     elif task == 'depth':
         fig, (ax1, ax2) = plt.subplots(1, 2)
+        plt.figure(figsize=(18, 8))
         ax1.plot(x_train, metrics['train_loss'], color='tab:red', label='Train loss')
         ax1.plot(x_val, metrics['val_loss'], color='tab:blue', label='Val loss')
         ax1.set_xlabel('Epochs')
