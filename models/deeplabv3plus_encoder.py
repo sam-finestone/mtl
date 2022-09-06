@@ -195,7 +195,8 @@ class DeepLabv3_plus(nn.Module):
         super(DeepLabv3_plus, self).__init__()
 
         # Atrous Conv
-        self.resnet_features = ResNet101(nInputChannels, os, pretrained=pretrained)
+        self.resnet_features = ResNet50(nInputChannels, os, pretrained=pretrained)
+        # self.resnet_features = ResNet101(nInputChannels, os, pretrained=pretrained)
 
         # ASPP
         if os == 16:
