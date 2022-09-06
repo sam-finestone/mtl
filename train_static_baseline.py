@@ -12,13 +12,14 @@ from loader.static_loader import staticLoader
 # from loader.video_dataset import *
 from utils.sort_dataset import *
 # from loader.nyuv2_dataloader import NYUV2
-from models.decoder import SegDecoder, DepthDecoder, MultiDecoder
+from models.decoder import SegDecoder, DepthDecoder, MultiDecoder, SegDecoder2
 from models.mtl_model import TemporalModel
 from models.static_model import StaticTaskModel
 from models.deeplabv3_encoder import DeepLabv3
+from models.deeplabv3plus_encoder import DeepLabv3_plus
 from utils.train_helpers import *
 from utils.static_helpers import static_single_task_trainer, static_test_single_task, save_ckpt
-from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback
+from sync_batchnorm import SynchronizedBatchNorm1d, SynchronizedBatchNorm2d, DataParallelWithCallback
 from utils.metrics import plot_learning_curves
 from loss.loss import InverseDepthL1Loss, L1LossIgnoredRegion, InverseDepthL1Loss2
 from scheduler import get_scheduler
@@ -133,6 +134,7 @@ train_set = staticLoader(DATASET_PATH,
                          path_num=path_n)
 val_set = staticLoader(DATASET_PATH,
                        split=cfg["data"]["val_split"],
+                       # split=cfg["data"]["train_split"],
                        transform=val_transform,
                        test_mode=True,
                        model_name=None,
@@ -169,7 +171,8 @@ test_dataloader = torch.utils.data.DataLoader(dataset=test_set,
 print('Initialising Model')
 # Initializing encoder
 deeplabv3_backbone = cfg["model"]["backbone"]["encoder"]["resnet_version"]
-enc = DeepLabv3(deeplabv3_backbone).to(device)
+# enc = DeepLabv3(deeplabv3_backbone).to(device)
+enc = DeepLabv3_plus(nInputChannels=3, output_dim=input_dim_decoder, os=8, pretrained=True, _print=True).to(device)
 # enc_optimizer = optim.SGD(enc.parameters(),
 #                           lr=cfg["training"]["optimizer"]["lr0"],
 #                           momentum=cfg["training"]["optimizer"]["momentum"],
@@ -178,11 +181,11 @@ enc = DeepLabv3(deeplabv3_backbone).to(device)
 # initialise decoders (one for each task)
 drop_out = cfg["model"]["dropout"]
 if TASK == 'segmentation':
-    dec = SegDecoder(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm1d).to(device)
+    dec = SegDecoder2(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm2d).to(device)
 elif TASK == 'depth':
-    dec = DepthDecoder(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm1d).to(device)
+    dec = DepthDecoder(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm2d).to(device)
 elif TASK == 'depth_segmentation':
-    dec = MultiDecoder(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm1d).to(device)
+    dec = MultiDecoder(input_dim_decoder, CLASS_TASKS, drop_out, SynchronizedBatchNorm2d).to(device)
 
 # initialise multi (or single) - task model
 model = StaticTaskModel(enc, dec, TASK).to(device)
@@ -218,7 +221,7 @@ if torch.cuda.is_available():
 #   {'params': filter(lambda p: p.requires_grad, last_params)}],
 #   lr=0.00025, momentum=0.9, weight_decay=0.0001)
 # seg was 0.01
-model_opt = optim.Adam(model.parameters(), lr=0.0001)
+model_opt = optim.AdamW(model.parameters(), lr=0.0001)
 # scheduler = get_scheduler(model_opt, cfg['training']['lr_schedule'])
 # model_opt = torch.optim.SGD(params=model.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-4)
 # model_opt = optim.SGD(model.parameters(), lr=cfg['training']["optimizer"]["lr"], momentum=0.9, weight_decay=0.0001)

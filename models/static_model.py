@@ -27,7 +27,11 @@ class StaticTaskModel(nn.Module):
     def forward(self, input):
         # [b, c, h, w]
         # print(input.shape)
+        print(input.shape)
+        # encoder_ftrs, low_level_feat = self.encoder(input)
         encoder_ftrs = self.encoder(input)
+        print(encoder_ftrs.shape)
+        # _, low_level_feat = self.backbone(input)
         # print(encoder_ftrs.shape)
         # print(encoder_ftrs.shape) torch.Size([8, 256, 16, 32]) or torch.Size([4, 256, 8, 16]) with (128,256)
         if self.task == 'depth' or self.task == 'segmentation':

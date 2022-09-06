@@ -19,6 +19,8 @@ from models.mtl_model import TemporalModel
 from models.single_backbone_temporal import TemporalModel2
 from models.static_model import StaticTaskModel
 from models.deeplabv3_encoder import DeepLabv3
+from models.deeplabv3plus_encoder import DeepLabv3_plus
+
 from utils.train_helpers import *
 # from utils.static_helpers import static_single_task_trainer, static_test_single_task, save_ckpt
 from utils.temporal_helpers import static_single_task_trainer, static_test_single_task, save_ckpt
@@ -58,16 +60,16 @@ parser.add_argument('-v', '--version', default='sum_fusion', type=str,
 parser.add_argument('-c', '--causal', default=False, type=bool,
                     help='Checking the causal pathway')
 # uncomment for segmentation run
-parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
-                    nargs="?", type=str, help="Configuration file to use")
+# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_seg',
+#                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for depth run
 # parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_depth',
 #                     nargs="?", type=str, help="Configuration file to use")
 
 # uncomment for both tasks
-# parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
-#                     nargs="?", type=str, help="Configuration file to use")
+parser.add_argument("--config", default='configs/medtronic_cluster/temporal_cityscape_config_both',
+                    nargs="?", type=str, help="Configuration file to use")
 
 args = parser.parse_args()
 with open(args.config) as fp:
@@ -123,6 +125,8 @@ val_transform = et.ExtCompose([
         et.ExtNormalize(mean=[0.485, 0.456, 0.406],
                         std=[0.229, 0.224, 0.225]),
     ])
+
+
 
 # Load the dataloaders
 print('Preprocessing Temporal ' + cfg["data"]["dataset"])
@@ -230,7 +234,7 @@ if torch.cuda.is_available():
     model = torch.nn.DataParallel(model).to(device)
     print('Model pushed to {} GPU(s), type {}.'.format(torch.cuda.device_count(), torch.cuda.get_device_name(0)))
 
-model_opt = optim.Adam(model.parameters(), lr=0.0001)
+model_opt = optim.AdamW(model.parameters(), lr=0.0001)
 # model_opt = optim.Adam(model.parameters(), lr=cfg["training"]["optimizer"]["lr0"])
 scheduler = optim.lr_scheduler.StepLR(model_opt,
                                       step_size=100,

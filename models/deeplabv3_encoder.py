@@ -121,11 +121,14 @@ class DeepLabv3(nn.Module):
         super(DeepLabv3, self).__init__()
         self.backbone = backbone
         # self.nc = nc
+        print(backbone)
         self.resnet = ResNet(backbone)
         if backbone == 'resnet50':
             self.assp = ASSP(in_channels=1024)
         elif backbone == 'resnet18':
             self.assp = ASSP(in_channels=256)
+        elif backbone == 'resnet101':
+            self.assp = ASSP(in_channels=1024)
         else:
             self.assp = ASSP(in_channels=512)
 

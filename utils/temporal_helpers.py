@@ -54,6 +54,7 @@ def static_single_task_trainer(epoch, criterion, semisup_loss, unsup_loss, train
             prefix="Train, epoch: [{}]".format(epoch))
 
     model.train()
+    # mode.eval()
     # conf_mat = ConfMatrix(19)
     # initialise the loss the function
     # metric_calculator = SegmentationMetrics(average=True, ignore_background=True)
@@ -248,8 +249,8 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
     loss_unsup = 0
     with torch.no_grad():
         for batch_idx, (inputs, labels, depth, filepath) in enumerate(test_loader):
-            inputs = inputs.float().to(device)
-            gt_semantic_labels = labels.long().to(device)
+            inputs = inputs.to(device, dtype=torch.float32)
+            gt_semantic_labels = labels.to(device, dtype=torch.long)
             gt_depth = depth.to(device)
             output = single_task_model(inputs)
 
@@ -277,10 +278,29 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
             if task == 'segmentation':
                 task_pred = output['supervised']
                 sup_loss = criterion(task_pred, gt_semantic_labels)
+                print(sup_loss)
                 total_loss = sup_loss + loss_semi_sup + loss_unsup
                 task_pred = task_pred.detach().max(dim=1)[1].cpu().numpy()
                 gt_semantic_labels = gt_semantic_labels.cpu().numpy()
                 metrics.update(gt_semantic_labels, task_pred)
+                # inputs = inputs[:, -1]
+                # filename = filepath[-1]
+                # denorm = Denormalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                # for i in range(len(inputs)):
+                #
+                #     image = inputs[i].detach().cpu().numpy()
+                #     target = gt_semantic_labels[i]
+                #     pred = task_pred[i]
+                #     file = filename[i]
+                #     image = (denorm(image) * 255).transpose(1, 2, 0).astype(np.uint8)
+                #     target = test_loader.dataset.decode_target(target).astype(np.uint8)
+                #     pred = test_loader.dataset.decode_target(pred).astype(np.uint8)
+                #
+                #     Image.fromarray(image).save('./{}_epoch_{}_img_seg.png'.format(file, epoch))
+                #     Image.fromarray(target).save('./{}_epoch_{}_target_seg.png'.format(file, epoch))
+                #     Image.fromarray(pred).save('./{}_epoch_{}_pred_seg.png'.format(file, epoch))
+                #
+                #     break
 
                 curr_mean_acc = metrics.get_results()['Mean Acc']
                 curr_mean_iou = metrics.get_results()['Mean IoU']
@@ -333,10 +353,6 @@ def static_test_single_task(epoch, criterion, semisup_loss, unsup_loss, test_loa
                 seg_pred = output['supervised'][1]
                 gt_depth = gt_depth[:, -1]  # get the last frame
 
-                print(seg_pred.shape)
-                print(depth_pred.shape)
-                print(gt_semantic_labels.shape)
-                print(gt_depth.shape)
                 # depth_pred, seg_pred = single_task_model(inputs)
                 seg_loss = criterion[1](seg_pred, gt_semantic_labels)
                 depth_loss = criterion[0](depth_pred, gt_depth)

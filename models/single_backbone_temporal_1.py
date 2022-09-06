@@ -11,10 +11,9 @@ from models.deeplabv3_encoder import DeepLabv3
 from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback, SynchronizedBatchNorm2d, SynchronizedBatchNorm3d
 import pdb
 from models.attention.attention import LocalContextAttentionBlock, GlobalContextAttentionBlock
-from models.decoder import SegDecoder, DepthDecoder, MultiDecoder, DecoderTemporal, SegDecoder2, DepthDecoder2
-from models.decoder import FeatureNoiseDecoder, FeatureDropDecoder, DropOutDecoder, CausalConv3d
+from models.decoder_1 import SegDecoder, DepthDecoder, MultiDecoder, DecoderTemporal
+from models.decoder_1 import FeatureNoiseDecoder, FeatureDropDecoder, DropOutDecoder, CausalConv3d
 from models.deeplabv3_encoder import DeepLabv3
-from models.deeplabv3plus_encoder import DeepLabv3_plus
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -43,7 +42,7 @@ class TemporalModel2(nn.Module):
         super().__init__()
         _backbone_slow = cfg["model"]["backbone"]["encoder"]["resnet_slow"]
         # _backbone_fast = cfg["model"]["backbone"]["encoder"]["resnet_fast"]
-        self.shared_encoder = DeepLabv3_plus(nInputChannels=3, output_dim=256, os=8, pretrained=True, _print=True)
+        self.shared_encoder = DeepLabv3(_backbone_slow)
         # self.encoder_slow = encoder_slow
         # self.encoder_fast = encoder_fast
         self.K = k
@@ -52,20 +51,20 @@ class TemporalModel2(nn.Module):
         self.semi_sup = semisup_loss
         self.unsup = unsup_loss
         self.causal_conv = causual_first_layer
-        input_dim_decoder = 304
+        input_dim_decoder = 256
         list_kf_indicies = [x for x in range(window_interval) if x % self.K == 0]
         list_non_kf_indicies = list(set(range(window_interval)) - set(list_kf_indicies))
         if version == 'sum_fusion':
-            input_dim_decoder = 304
+            input_dim_decoder = 256
         if version == 'convnet_fusion':
             # number of keyframes + last_fast + annotated_frame
-            input_dim_decoder = 304
+            input_dim_decoder = 256
             self.with_se_block = False
             # self.se_layer = SE_Layer(input_dim_decoder, 2)
             if self.causal_conv:
-                self.convnet_fusion_layer = nn.Conv3d(input_dim_decoder, 304, kernel_size=(4, 1, 1), stride=1)
+                self.convnet_fusion_layer = nn.Conv3d(input_dim_decoder, 256, kernel_size=(4, 1, 1), stride=1)
             if not self.causal_conv:
-                self.convnet_fusion_layer = nn.Conv3d(input_dim_decoder, 304, kernel_size=(3, 1, 1), stride=1)
+                self.convnet_fusion_layer = nn.Conv3d(input_dim_decoder, 256, kernel_size=(3, 1, 1), stride=1)
 
         # elif version == 'global_atten_fusion':
         #     input_dim_t = 256
@@ -75,72 +74,78 @@ class TemporalModel2(nn.Module):
         #     self.se_layer = SE_Layer(input_dim_decoder, 2)
         #     self.global_attention_block = GlobalContextAttentionBlock(input_dim_t, output_dim, last_affine=True)
         if self.causal_conv:
-            self.se_layer_slow = SE_Layer(304, 2)
-            self.se_layer_fast = SE_Layer(304, 2)
-            self.casual_conv_slow = nn.Sequential(CausalConv3d(in_channels=304, out_channels=304, kernel_size=(2, 3, 3),),
-                                                  CausalConv3d(in_channels=304 ,out_channels=304,kernel_size=(2, 3, 3), ), )
-            self.casual_conv_fast = nn.Sequential(CausalConv3d(in_channels=304, out_channels=304, kernel_size=(2, 3, 3), ),
-                                                  CausalConv3d(in_channels=304, out_channels=304, kernel_size=(2, 3, 3), ), )
+            self.se_layer_slow = SE_Layer(256, 2)
+            self.se_layer_fast = SE_Layer(256, 2)
+            self.casual_conv_slow = nn.Sequential(CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3),),
+                                                  CausalConv3d(in_channels=256 ,out_channels=256,kernel_size=(2, 3, 3), ), )
+            self.casual_conv_fast = nn.Sequential(CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3), ),
+                                                  CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3), ), )
 
         # Allocate the appropriate decoder for single task
         if task == 'segmentation':
-            self.task_decoder = SegDecoder2(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm2d)
+            self.task_decoder = SegDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
             if version == 'conv3d_fusion':
-                input_dim_decoder = 304  # T dimension - but here its the number of keyframes + last fast frame
-                self.task_decoder = DecoderTemporal(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm3d)
-            # if version == 'global_atten_fusion':
-            #     self.task_decoder = SegDecoder(512, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
-
-        if task == 'depth':
-            self.task_decoder = DepthDecoder2(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
-            if version == 'conv3d_fusion':
-                input_dim_decoder = 304  # T dimension - but here its the number of keyframes + last fast frame
+                input_dim_decoder = 256  # T dimension - but here its the number of keyframes + last fast frame
                 self.task_decoder = DecoderTemporal(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm3d)
             if version == 'global_atten_fusion':
-                self.task_decoder = DepthDecoder(512, class_tasks, seg_drop_out, SynchronizedBatchNorm2d)
+                self.task_decoder = SegDecoder(512, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
+
+        if task == 'depth':
+            self.task_decoder = DepthDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
+            if version == 'conv3d_fusion':
+                input_dim_decoder = 256  # T dimension - but here its the number of keyframes + last fast frame
+                self.task_decoder = DecoderTemporal(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm3d)
+            if version == 'global_atten_fusion':
+                self.task_decoder = DepthDecoder(512, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
 
         # Set up the appropriate multi-task decoder for multi-task
         if task == 'depth_segmentation':
             depth_class = class_tasks[0]
             seg_class = class_tasks[1]
-            input_dim_decoder = 304
-            self.se_layer_depth = SE_Layer(304, 2)
-            self.se_layer_seg = SE_Layer(304, 2)
+            input_dim_decoder = 256
+            self.se_layer_depth = SE_Layer(input_dim_decoder, 2)
+            self.se_layer_seg = SE_Layer(input_dim_decoder, 2)
             if self.causal_conv:
                 self.casual_pass_depth = nn.Sequential(
-                    CausalConv3d(in_channels=304, out_channels=304, kernel_size=(2, 3, 3), ),
-                    CausalConv3d(in_channels=304, out_channels=304, kernel_size=(2, 3, 3), ), )
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3), ),
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3), ), )
                 self.casual_pass_seg = nn.Sequential(
-                    CausalConv3d(in_channels=304, out_channels=304, kernel_size=(2, 3, 3), ),
-                    CausalConv3d(in_channels=304, out_channels=304, kernel_size=(2, 3, 3), ), )
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3), ),
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(2, 3, 3), ), )
             else:
                 self.casual_pass_depth = nn.Sequential(
-                    CausalConv3d(in_channels=304, out_channels=304, kernel_size=(3, 3, 3), ),
-                    CausalConv3d(in_channels=304, out_channels=304, kernel_size=(3, 3, 3), ), )
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ),
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ), )
                 self.casual_pass_seg = nn.Sequential(
-                    CausalConv3d(in_channels=304, out_channels=304, kernel_size=(3, 3, 3), ),
-                    CausalConv3d(in_channels=304, out_channels=304, kernel_size=(3, 3, 3), ), )
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ),
+                    CausalConv3d(in_channels=256, out_channels=256, kernel_size=(3, 3, 3), ), )
             # self.task_decoder = MultiDecoder(input_dim_decoder, class_tasks, seg_drop_out, SynchronizedBatchNorm1d)
-            depth_dec = [DepthDecoder2(input_dim_decoder, depth_class, seg_drop_out, SynchronizedBatchNorm2d)]
-            seg_dec = [SegDecoder2(input_dim_decoder, seg_class, seg_drop_out, SynchronizedBatchNorm2d)]
+            depth_dec = [DepthDecoder(input_dim_decoder, depth_class, seg_drop_out, SynchronizedBatchNorm1d)]
+            seg_dec = [SegDecoder(input_dim_decoder, seg_class, seg_drop_out, SynchronizedBatchNorm1d)]
             self.list_decoders = nn.ModuleList([*depth_dec, *seg_dec])
 
             if version == 'conv3d_fusion':
-                input_dim_decoder = 304  # T dimension - but here its the number of keyframes + last fast frame
-                depth_dec = [DecoderTemporal(input_dim_decoder, depth_class, seg_drop_out, SynchronizedBatchNorm2d)]
-                seg_dec = [DecoderTemporal(input_dim_decoder, seg_class, seg_drop_out, SynchronizedBatchNorm2d)]
+                input_dim_decoder = 256  # T dimension - but here its the number of keyframes + last fast frame
+                depth_dec = [DecoderTemporal(input_dim_decoder, depth_class, seg_drop_out, SynchronizedBatchNorm1d)]
+                seg_dec = [DecoderTemporal(input_dim_decoder, seg_class, seg_drop_out, SynchronizedBatchNorm1d)]
                 self.list_decoders = nn.ModuleList([*depth_dec, *seg_dec])
 
 
     def forward(self, input):
         # [b, t, c, h, w]
-        # print(input[:, -1])
-
         #print(input.shape) # torch.Size([4, 3, 3, 128, 256])
         enc_ftrs, batch_size, t_dim = self.run_encoder(input, self.shared_encoder)
-        print(enc_ftrs.shape) #- torch.Size([4, 3, 304, 128, 256])
         output_ftrs = self.reshape_output(enc_ftrs, batch_size, t_dim)
-        print(output_ftrs.shape)
+        # print(output_ftrs.shape) # torch.Size([4, 3, 256, 8, 16])
+        print(output_ftrs[:, 0].shape)
+        print(output_ftrs[:, 2].shape)
+        # if self.version == 'global_atten_fusion':
+        #     task_predictions = self.global_attention_fusion(output_slow, output_fast, list_kf_indicies,
+        #                                                     list_non_kf_indicies, mulit_task=self.multi_task)
+        # if self.version == 'local_atten_fusion':
+        #     task_predictions = self.local_attention_fusion(output_slow, output_fast, list_kf_indicies,
+        #                                                    list_non_kf_indicies, mulit_task=self.multi_task)
+        # last frame is a keyframe frame (slow encoded)
         task_predictions = 0
         if not self.multi_task:
             # Different ways of propagating temporal features
@@ -158,6 +163,13 @@ class TemporalModel2(nn.Module):
                 task_predictions = self.temporal_net(output_ftrs, mulit_task=self.multi_task, causal=self.causal_conv)
             elif self.version == 'causal_fusion':
                 task_predictions = self.causal_module(output_ftrs, causal=self.causal_conv)
+
+        # if self.semi_sup['Mode']:
+        #     # take all the frames and run them through the main Seg decoder
+        #     # all_encoded_frames = torch.cat([output_slow, output_fast], dim=1)
+        #     # print(unlabelled_frame_fusion.shape)
+        #     # unlabelled_pred will be a list of segmented outputs
+        #     main_labelled_pred, main_unlabelled_pred, perturbed_unlabelled_pred = self.run_perturbed_decoders(all_encoded_frames, index_of_labelled_frame)
 
         # Output based on model choice
         return {'supervised': task_predictions}
@@ -271,9 +283,12 @@ class TemporalModel2(nn.Module):
             enc_ftrs = self.add_casaul_module(enc_ftrs)
 
         x_fusion = enc_ftrs.permute(0, 2, 1, 3, 4)
-        print(x_fusion.shape)
         x_fusion = self.convnet_fusion_layer(x_fusion)
         x_fusion = x_fusion.permute(0, 1, 2, 3, 4).squeeze()
+
+        if with_se_block:
+            x_fusion = x_fusion.unsqueeze(1)
+            x_fusion = self.se_layer(x_fusion)
 
         #  depth decoder or segmentation decoder
         # task_decoder = self.list_decoders[-1]

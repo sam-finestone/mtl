@@ -66,8 +66,18 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
         gt_semantic_labels = labels.to(device, dtype=torch.long)
         # torch.Size([8, 3, 256, 512])
         gt_depth = depth.to(device)
+        print(inputs[0].min())
+        print(inputs[0].max())
         if task == 'segmentation':
             task_pred = model(inputs)
+            print(task_pred.shape)
+            # print(gt_semantic_labels)
+
+            # print(gt_semantic_labels.shape)
+            # print(gt_semantic_labels.max())
+            # print(gt_semantic_labels.min())
+            # print(task_pred.max())
+            # print(task_pred.min())
             loss = criterion(task_pred, gt_semantic_labels)
             loss.backward()
             model_opt.step()
@@ -75,6 +85,8 @@ def static_single_task_trainer(epoch, criterion, train_loader, model, model_opt,
             # Get metrics
             task_pred = task_pred.detach().max(dim=1)[1].cpu().numpy()
             gt_semantic_labels = gt_semantic_labels.cpu().numpy()
+            print(task_pred[0])
+            print(gt_semantic_labels[0])
             # loss = criterion(task_pred, gt_semantic_labels.squeeze())
             metrics.update(gt_semantic_labels, task_pred)
             curr_mean_acc = metrics.get_results()['Mean Acc']
@@ -222,16 +234,20 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
             gt_semantic_labels = labels.to(device, dtype=torch.long)
             gt_depth = depth.to(device)
 
+
             if task == 'segmentation':
                 task_pred = single_task_model(inputs)
+
                 loss = criterion(task_pred, gt_semantic_labels)
                 task_pred = task_pred.detach().max(dim=1)[1].cpu().numpy()
+                print(task_pred[0])
+                print(gt_semantic_labels[0])
                 gt_semantic_labels = gt_semantic_labels.cpu().numpy()
                 metrics.update(gt_semantic_labels, task_pred)
                 curr_mean_acc = metrics.get_results()['Mean Acc']
                 curr_mean_iou = metrics.get_results()['Mean IoU']
                 bs = inputs.size(0)
-                loss = loss.item()
+                loss = loss.detach().cpu().numpy()
                 loss_running.update(loss, bs)
                 acc_running.update(curr_mean_acc, bs)
                 miou_running.update(curr_mean_iou, bs)
@@ -337,7 +353,7 @@ def static_test_single_task(epoch, criterion, test_loader, single_task_model, ta
         print('Accuracy      : {:5.3f}'.format(acc_running.avg))
         print('Miou      : {:5.3f}'.format(miou_running.avg))
         print('---------------------')
-        return result['Mean Acc'], loss_running.avg, result['Mean IoU']
+        return acc_running.avg, loss_running.avg, miou_running.avg
     # output for multi task learning
     miou = iou.outputScores(folder)
     print('Abs. Error      : {:5.3f}'.format(abs_error_running.avg))

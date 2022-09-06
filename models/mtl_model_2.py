@@ -11,8 +11,8 @@ from models.deeplabv3_encoder import DeepLabv3
 from sync_batchnorm import SynchronizedBatchNorm1d, DataParallelWithCallback, SynchronizedBatchNorm2d, SynchronizedBatchNorm3d
 import pdb
 from models.attention.attention import LocalContextAttentionBlock, GlobalContextAttentionBlock
-from models.decoder import SegDecoder, DepthDecoder, MultiDecoder, DecoderTemporal
-from models.decoder import FeatureNoiseDecoder, FeatureDropDecoder, DropOutDecoder
+from models.decoder_1 import SegDecoder, DepthDecoder, MultiDecoder, DecoderTemporal
+from models.decoder_1 import FeatureNoiseDecoder, FeatureDropDecoder, DropOutDecoder
 from models.deeplabv3_encoder import DeepLabv3
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
