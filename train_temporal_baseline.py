@@ -14,7 +14,7 @@ from loader.temporal_loader_3 import temporalLoader3
 # from loader.video_dataset import *
 from utils.sort_dataset import *
 # from loader.nyuv2_dataloader import NYUV2
-from models.decoder import SegDecoder, DepthDecoder, MultiDecoder, DecoderTemporal
+from models.decoder import SegDecoder, DepthDecoder, MultiDecoder, DecoderTemporal, DepthDecoder2, SegDecoder2
 from models.mtl_model import TemporalModel
 from models.single_backbone_temporal import TemporalModel2
 from models.static_model import StaticTaskModel
@@ -77,8 +77,8 @@ with open(args.config) as fp:
 
 # set seed for reproducibility
 init_seed(12345, en_cudnn=False)
-gpu_usg = ",".join(list(map(str, args.gpu)))
-os.environ["CUDA_VISIBLE_DEVICES"] = gpu_usg
+# gpu_usg = ",".join(list(map(str, args.gpu)))
+# os.environ["CUDA_VISIBLE_DEVICES"] = gpu_usg
 num_gpu = torch.cuda.device_count()
 use_gpu = torch.cuda.is_available()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
