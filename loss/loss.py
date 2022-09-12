@@ -7,43 +7,44 @@ from utils import ramps
 
 __all__ = ['SegmentationLosses', 'OhemCELoss2D', 'AdvLoss', 'DiceLoss', 'DiceBCELoss']
 
-class SegmentationLosses(nn.CrossEntropyLoss):
-    """2D Cross Entropy Loss with Auxilary Loss"""
-    def __init__(self,
-                 weight=None,
-                 ignore_index=-1):
-
-        super(SegmentationLosses, self).__init__(weight, None, ignore_index)
-
-    def forward(self, pred, target):
-        return super(SegmentationLosses, self).forward(pred, target)
-
-class OhemCELoss2D(nn.CrossEntropyLoss):
-    """2D Cross Entropy Loss with Auxilary Loss"""
-    def __init__(self,
-                 n_min,
-                 thresh=0.7,
-                 ignore_index=-1):
-
-        super(OhemCELoss2D, self).__init__(None, None, ignore_index, reduction='none')
-
-        self.thresh = -math.log(thresh)
-        self.n_min = n_min
-        self.ignore_index = ignore_index
-
-    def forward(self, pred, target):
-        return self.OhemCELoss(pred, target)
-
-    def OhemCELoss(self, logits, labels):
-        loss = super(OhemCELoss2D, self).forward(logits, labels).view(-1)
-        loss, _ = torch.sort(loss, descending=True)
-        if loss[self.n_min] > self.thresh:
-            loss = loss[loss>self.thresh]
-        else:
-            loss = loss[:self.n_min]
-        return torch.mean(loss)
+# class SegmentationLosses(nn.CrossEntropyLoss):
+#     """2D Cross Entropy Loss with Auxilary Loss"""
+#     def __init__(self,
+#                  weight=None,
+#                  ignore_index=-1):
+#
+#         super(SegmentationLosses, self).__init__(weight, None, ignore_index)
+#
+#     def forward(self, pred, target):
+#         return super(SegmentationLosses, self).forward(pred, target)
+#
+# class OhemCELoss2D(nn.CrossEntropyLoss):
+#     """2D Cross Entropy Loss with Auxilary Loss"""
+#     def __init__(self,
+#                  n_min,
+#                  thresh=0.7,
+#                  ignore_index=-1):
+#
+#         super(OhemCELoss2D, self).__init__(None, None, ignore_index, reduction='none')
+#
+#         self.thresh = -math.log(thresh)
+#         self.n_min = n_min
+#         self.ignore_index = ignore_index
+#
+#     def forward(self, pred, target):
+#         return self.OhemCELoss(pred, target)
+#
+#     def OhemCELoss(self, logits, labels):
+#         loss = super(OhemCELoss2D, self).forward(logits, labels).view(-1)
+#         loss, _ = torch.sort(loss, descending=True)
+#         if loss[self.n_min] > self.thresh:
+#             loss = loss[loss>self.thresh]
+#         else:
+#             loss = loss[:self.n_min]
+#         return torch.mean(loss)
 
 # Depth inverse depth l1 loss
+# loss fucntion taken from MTAN code base  - https://github.com/lorenmt/mtan/blob/master/im2im_pred/utils.py
 class InverseDepthL1Loss(nn.Module):
     def __init__(self):
         super().__init__()
@@ -84,6 +85,7 @@ class L1LossIgnoredRegion(nn.Module):
                / torch.nonzero(valid_mask, as_tuple=False).size(0)
         return loss
 
+# Taken from the CCT code base - for consistency loss
 class consistency_weight(object):
     """
     ramp_types = ['sigmoid_rampup', 'linear_rampup', 'cosine_rampup', 'log_rampup', 'exp_rampup']
@@ -218,25 +220,25 @@ def model_fit(x_pred, x_output, task_type):
     return loss
 
 
-class Discriminator(nn.Module):
-    # self.model = nn.Sequential(series of convs) - outputs a binary probability of being from Slow or Fast
-    # self.act = nn.Sigmoid()
-
-    def forward(self, x_slow, x_fast):
-        return self.act(self.model(x_slow)), self.act(self.model(x_fast))
-
-
-def loss_function(y_pred, y_gt, x_slow_all, x_fast_all, D=Discriminator()):
-    # prediction loss
-    loss_1 = nn.CrossEntropyLoss()(y_pred, y_gt)
-
-    # adversarial loss
-    loss_l1 = nn.L1Loss()(x_slow_all, x_fast_all)
-    slow_prob = D(x_slow_all)
-    fast_prob = D(x_fast_all)
-    loss_adv = nn.BCELoss()
-    labels = torch.tensor(torch.ones_like(slow_prob), torch.zeros_like(fast_prob))
-    loss_adv_c = loss_adv([slow_prob, fast_prob], labels)
-    loss_from_paper = alpha * loss_l1 - beta * loss_adv_c
-
-    return loss_1, loss_from_paper
+# class Discriminator(nn.Module):
+#     # self.model = nn.Sequential(series of convs) - outputs a binary probability of being from Slow or Fast
+#     # self.act = nn.Sigmoid()
+#
+#     def forward(self, x_slow, x_fast):
+#         return self.act(self.model(x_slow)), self.act(self.model(x_fast))
+#
+#
+# def loss_function(y_pred, y_gt, x_slow_all, x_fast_all, D=Discriminator()):
+#     # prediction loss
+#     loss_1 = nn.CrossEntropyLoss()(y_pred, y_gt)
+#
+#     # adversarial loss
+#     loss_l1 = nn.L1Loss()(x_slow_all, x_fast_all)
+#     slow_prob = D(x_slow_all)
+#     fast_prob = D(x_fast_all)
+#     loss_adv = nn.BCELoss()
+#     labels = torch.tensor(torch.ones_like(slow_prob), torch.zeros_like(fast_prob))
+#     loss_adv_c = loss_adv([slow_prob, fast_prob], labels)
+#     loss_from_paper = alpha * loss_l1 - beta * loss_adv_c
+#
+#     return loss_1, loss_from_paper

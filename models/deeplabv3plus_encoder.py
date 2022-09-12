@@ -4,6 +4,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.model_zoo as model_zoo
 
+# This deeplabv3 was taken from https://github.com/chenxi116/DeepLabv3.pytorch/blob/master/deeplab.py
+# I would like to thank them for their research and for allowing to push their work for public use
+
 class Bottleneck(nn.Module):
     expansion = 4
 

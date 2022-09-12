@@ -6,6 +6,8 @@ from models.resnet_encoder import ResNet50
 from torchvision import models
 from tensorboardX import SummaryWriter
 from torchvision.models import resnet50, resnet18, resnet101, resnet34, resnet152
+
+
 class ResNet(nn.Module):
     def __init__(self, version='resnet50', in_channels=3, conv1_out=64):
         super(ResNet, self).__init__()

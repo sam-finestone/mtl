@@ -26,7 +26,7 @@ class ConfMatrix(object):
         iu = torch.diag(h) / (h.sum(1) + h.sum(0) - torch.diag(h))
         return torch.mean(iu), acc
 
-
+# depth error function taken from MTAN code base  - https://github.com/lorenmt/mtan/blob/master/im2im_pred/utils.py
 def depth_error(x_pred, x_output):
     device = x_pred.device
     # invalid_idx = -1
@@ -108,7 +108,7 @@ Arguments:
     - voidClass: class id of void class (class ignored for calculating metrics)
 ====================
 """
-
+# iouCalc class taken from: https://github.com/mcordts/cityscapesScripts
 
 class iouCalc():
 
