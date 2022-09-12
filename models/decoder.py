@@ -167,16 +167,16 @@ class MultiDecoder(nn.Module):
     def __init__(self, input_dim, num_classes, drop_out, BatchNorm):
         super(MultiDecoder, self).__init__()
         # Segmentation
-        self.seg_decoder = SegDecoder(input_dim, num_classes[1], drop_out, BatchNorm)
+        self.seg_decoder = SegDecoder2(input_dim, num_classes[1], drop_out, BatchNorm)
         # Depth
-        self.depth_decoder = DepthDecoder(input_dim, num_classes[0], drop_out, BatchNorm)
+        self.depth_decoder = DepthDecoder2(input_dim, num_classes[0], drop_out, BatchNorm)
         self._init_weight()
 
-    def forward(self, x, low_level_feat):
+    def forward(self, x):
         # compute the depth
-        depth_pred = self.depth_decoder(x, low_level_feat)
+        depth_pred = self.depth_decoder(x)
         # compute the segmentation
-        seg_pred = self.seg_decoder(x, low_level_feat)
+        seg_pred = self.seg_decoder(x)
         return depth_pred, seg_pred
 
     def _init_weight(self):

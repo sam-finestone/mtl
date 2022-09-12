@@ -156,6 +156,8 @@ class TemporalModel2(nn.Module):
                 task_predictions = self.sum_fusion(output_ftrs, mulit_task=self.multi_task, causal=self.causal_conv)
             elif self.version == 'conv3d_fusion':
                 task_predictions = self.temporal_net(output_ftrs, mulit_task=self.multi_task, causal=self.causal_conv)
+            elif self.version == 'convnet_fusion':
+                task_predictions = self.convnet_fusion(output_ftrs, with_se_block=False, causal=self.causal_conv)
             elif self.version == 'causal_fusion':
                 task_predictions = self.causal_module(output_ftrs, causal=self.causal_conv)
 
@@ -270,15 +272,33 @@ class TemporalModel2(nn.Module):
         if causal:
             enc_ftrs = self.add_casaul_module(enc_ftrs)
 
-        x_fusion = enc_ftrs.permute(0, 2, 1, 3, 4)
-        print(x_fusion.shape)
-        x_fusion = self.convnet_fusion_layer(x_fusion)
-        x_fusion = x_fusion.permute(0, 1, 2, 3, 4).squeeze()
+        if not self.multi_task:
+            x_fusion = enc_ftrs.permute(0, 2, 1, 3, 4)
+            print(x_fusion.shape)
+            x_fusion = self.convnet_fusion_layer(x_fusion)
+            x_fusion = x_fusion.permute(0, 1, 2, 3, 4).squeeze()
+            task_predictions = self.task_decoder(x_fusion)
+            task_predictions = task_predictions.squeeze(1)
+        else:
 
-        #  depth decoder or segmentation decoder
-        # task_decoder = self.list_decoders[-1]
-        task_predictions = self.task_decoder(x_fusion)
-        task_predictions = task_predictions.squeeze(1)
+            x_fusion_input_seg = torch.stack([self.se_layer_seg(enc_ftrs[:, i]) for i in range(enc_ftrs.shape[1])],
+                                             dim=1)
+            x_fusion_input_depth = torch.stack([self.se_layer_depth(enc_ftrs[:, i]) for i in range(enc_ftrs.shape[1])],
+                                               dim=1)
+
+            x_fusion_seg = x_fusion_input_seg.permute(0, 2, 1, 3, 4)
+            x_fusion_seg = self.convnet_fusion_layer(x_fusion_seg)
+            x_fusion_seg = x_fusion_seg.permute(0, 1, 2, 3, 4).squeeze()
+
+            x_fusion_depth = x_fusion_input_depth.permute(0, 2, 1, 3, 4)
+            x_fusion_depth = self.convnet_fusion_layer(x_fusion_depth)
+            x_fusion_depth = x_fusion_depth.permute(0, 1, 2, 3, 4).squeeze()
+
+            depth_pred = self.list_decoders[0](x_fusion_depth)
+            depth_pred = depth_pred.squeeze(1)
+            seg_pred = self.list_decoders[1](x_fusion_seg)
+            seg_pred = seg_pred.squeeze(1)
+            task_predictions = [depth_pred, seg_pred]
         return task_predictions
 
     def global_attention_fusion(self, output_slow, output_fast, list_kf_indicies, list_non_kf_indicies, mulit_task=False):
